@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4faf9">
+  <title>إدارة دوائي</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="admin.css?v=20261009">
+  <script src="admin.js?v=20261005-pharmacy-chat" defer></script>
+</head>
+<body class="admin-page">
+  <header class="admin-header">
+    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true"><img src="logo-mark.png" alt=""></span><span class="brand-copy"><strong>دوائي</strong><small>لوحة الإدارة</small></span></a>
+    <a class="button button-outline" href="./">العودة للموقع</a>
+  </header>
+  <main class="admin-main">
+    <section class="admin-login-card" id="admin-login">
+      <span class="admin-eyebrow">إدارة مركزية محمية</span>
+      <h1>تسجيل دخول الإدارة</h1>
+      <p>حساب الإدارة يُنشأ من إعدادات الخادم، ولا يوجد حساب افتراضي.</p>
+      <form id="admin-login-form">
+        <label for="admin-contact">البريد الإلكتروني</label>
+        <input id="admin-contact" type="email" autocomplete="username" required>
+        <label for="admin-password">كلمة المرور</label>
+        <input id="admin-password" type="password" autocomplete="current-password" required>
+        <button class="button button-primary" type="submit">دخول آمن</button>
+        <p class="admin-error" id="admin-login-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section id="admin-dashboard" hidden>
+      <div class="admin-title-row">
+        <div><span class="admin-eyebrow">لوحة متابعة مركزية</span><h1>إدارة دوائي</h1><p>مراجعة الطلبات، إدارة قاعدة الأدوية، وسجل النواقص والعمليات.</p></div>
+        <div class="admin-actions"><button class="button button-outline" id="admin-refresh" type="button">تحديث البيانات</button><button class="button button-outline" id="admin-logout" type="button">تسجيل الخروج</button></div>
+      </div>
+      <nav class="admin-tabs" aria-label="أقسام الإدارة">
+        <button type="button" class="active" data-admin-tab="pharmacies">طلبات الصيدليات</button>
+        <button type="button" data-admin-tab="users">المستخدمون</button>
+        <button type="button" data-admin-tab="medicines">قاعدة الأدوية</button>
+        <button type="button" data-admin-tab="shortages">خريطة النواقص</button>
+        <button type="button" data-admin-tab="audit">سجل العمليات</button>
+      </nav>
+      <div class="admin-content" id="admin-content"><div class="admin-loading">جارٍ تحميل البيانات...</div></div>
+    </section>
+  </main>
+  <div class="admin-toast-region" id="admin-toast" role="status" aria-live="polite"></div>
+</body>
+</html>

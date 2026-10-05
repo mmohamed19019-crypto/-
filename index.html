@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4faf9">
+  <meta name="description" content="دوائي — ابحث عن الأدوية واستكشف دليل الصيدليات من بيانات مشروعك.">
+  <title>دوائي | دوّر على دواك</title>
+  <link rel="icon" href="logo-mark.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="features.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <script src="data.js" defer></script>
+  <script src="app.js?v=20261006-pharmacy-stock" defer></script>
+  <script src="features.js?v=20261006-pharmacy-stock-intent2" defer></script>
+</head>
+<body>
+  <div class="announcement"><span class="announcement-dot"></span> دليلك للأدوية والصيدليات — المعلومات حسب ملف البيانات المرفق</div>
+  <header class="site-header" id="top">
+    <a class="brand" href="#top" aria-label="دوائي - الرئيسية">
+      <span class="brand-mark" aria-hidden="true"><img src="logo-mark.png" alt=""></span>
+      <span class="brand-copy"><strong>دوائي</strong><small>أقرب لسلامتك</small></span>
+    </a>
+    <nav class="main-nav" aria-label="التنقل الرئيسي">
+      <button class="nav-link active" data-view="medicines">الأدوية</button>
+      <button class="nav-link" data-view="pharmacies">الصيدليات</button>
+      <a class="nav-link nav-about" href="#about">عن دوائي</a>
+    </nav>
+    <div class="header-actions">
+      <button class="button button-account" id="auth-open" type="button">دخول / حساب جديد</button>
+      <button class="button button-emergency" id="emergency-open" type="button"><span>!</span> طوارئ</button>
+      <button class="icon-button theme-button" id="theme-toggle" type="button" aria-label="تفعيل الوضع الليلي" title="تغيير المظهر">
+        <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+      </button>
+      <button class="button button-primary header-search" id="go-search" type="button"><span class="search-small" aria-hidden="true">⌕</span> ابدأ البحث</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="eyebrow-icon">✳</span> رعاية أقرب، من غير لف كتير</div>
+        <h1>دواءك أقرب<br>مما <span class="headline-accent">تتخيّل.</span></h1>
+        <p>ابحث في قائمة الأدوية، واعرف بيانات الصيدليات المتاحة في ملفك — كل ده في مكان واحد.</p>
+        <div class="hero-actions">
+          <button class="button button-primary button-large" id="hero-search" type="button">دوّر على دواء <span aria-hidden="true">←</span></button>
+          <button class="button button-quiet button-large" id="hero-pharmacies" type="button">استكشف الصيدليات</button>
+        </div>
+        <div class="trust-line"><span class="trust-check">✓</span> بيانات واضحة <i></i><span class="trust-check">✓</span> بحث سريع <i></i><span class="trust-check">✓</span> تجربة بسيطة</div>
+      </div>
+      <div class="hero-visual" aria-label="رسم توضيحي لصيدلية ودواء">
+        <div class="visual-orbit orbit-one"></div><div class="visual-orbit orbit-two"></div>
+        <span class="float-pill pill-one"></span><span class="float-pill pill-two"></span><span class="float-pill pill-three"></span>
+        <div class="hero-glass-card">
+          <div class="mini-map">
+            <svg viewBox="0 0 410 245" role="img" aria-label="رسم مبسط لمواقع الصيدليات">
+              <path d="M-8 57 418 164M-9 190 406 76M92-12l87 269M302-16l-70 275M8 122l377 13M139-4l-10 266" />
+              <path class="map-road main-road" d="M-5 156 413 89M218-5l-34 263" />
+              <path class="map-route" d="m82 154 89-33 61 21 89-52"/>
+            </svg>
+            <span class="map-pin pin-a"><b>✚</b></span><span class="map-pin pin-b"><b>✚</b></span><span class="map-pin pin-c"><b>✚</b></span>
+            <div class="map-label"><span class="live-dot"></span> شبكة الصيدليات</div>
+          </div>
+          <div class="hero-medicine">
+            <div class="medicine-box-art"><span class="box-cross">✚</span><span class="box-line"></span><span class="box-name">CARE<br><small>DAILY HEALTH</small></span></div>
+            <div class="medicine-card-caption"><span class="caption-icon">✦</span><span><b>دواك في مكان واحد</b><small>بيانات منظمة وسهلة البحث</small></span></div>
+          </div>
+          <div class="mascot-bubble" aria-label="دوّي، شخصية دوائي">دوّي<span>أهلاً بيك!</span></div>
+          <span class="visual-spark spark-one">✳</span><span class="visual-spark spark-two">✦</span>
+        </div>
+      </div>
+      <div class="hero-bottom-note"><span>01</span> ابحث في البيانات المدمجة <span class="note-line"></span><span class="note-label">بسهولة واطمئنان</span></div>
+    </section>
+
+    <section class="stats-strip" aria-label="ملخص البيانات">
+      <div class="stat-item"><span class="stat-icon teal">✚</span><span><strong id="stat-medicines">—</strong><small>صنف دوائي في الملف</small></span></div>
+      <div class="stat-separator"></div>
+      <div class="stat-item"><span class="stat-icon blue">⌖</span><span><strong id="stat-pharmacies">—</strong><small>صيدلية في الدليل</small></span></div>
+      <div class="stat-separator"></div>
+      <div class="stat-item"><span class="stat-icon amber">⌕</span><span><strong id="stat-categories">—</strong><small>تصنيف دوائي</small></span></div>
+      <div class="stats-note"><span class="live-dot"></span> البيانات مدمجة من ملف المشروع</div>
+    </section>
+
+    <section class="directory-section" id="directory">
+      <div class="section-heading">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-icon">⌕</span> دليل دوائي</div>
+          <h2>إيه اللي بتدور عليه؟</h2>
+          <p>اكتب اسم الدوا أو الصيدلية، وهنساعدك توصل للمعلومة أسرع.</p>
+        </div>
+        <button class="export-button" id="export-data" type="button" title="تنزيل النتائج الحالية كملف CSV">
+          <span aria-hidden="true">↓</span> تنزيل النتائج
+        </button>
+      </div>
+
+      <div class="search-panel" id="search-panel">
+        <div class="search-tabs" role="tablist" aria-label="نوع البحث">
+          <button class="search-tab active" id="tab-medicines" role="tab" aria-selected="true" data-view="medicines"><span>✚</span> الأدوية <b id="tab-medicine-count">—</b></button>
+          <button class="search-tab" id="tab-pharmacies" role="tab" aria-selected="false" data-view="pharmacies"><span>⌖</span> الصيدليات <b id="tab-pharmacy-count">—</b></button>
+        </div>
+        <div class="search-input-wrap">
+          <span class="input-search-icon" aria-hidden="true">⌕</span>
+          <label class="sr-only" for="search-input">ابحث عن دواء أو صيدلية</label>
+          <input id="search-input" type="search" placeholder="اكتب اسم الدواء أو المادة الفعالة..." autocomplete="off">
+          <kbd>Ctrl K</kbd>
+          <button class="search-tool-button" id="voice-search" type="button" aria-label="البحث بالصوت" title="ابحثي بالصوت">🎙</button>
+          <label class="search-tool-button image-search-label" for="image-search" title="ابحثي بصورة دواء أو روشتة" aria-label="البحث بصورة"><span>▧</span></label>
+          <input id="image-search" class="visually-hidden-input" type="file" accept="image/*" capture="environment">
+          <button class="clear-search" id="clear-search" type="button" aria-label="مسح البحث" hidden>×</button>
+        </div>
+        <div class="instant-search-status" id="instant-search-status" role="status" aria-live="polite">بحث مباشر في دليل الأدوية المحلي.</div>
+        <div class="filter-row">
+          <div class="filter-group" id="category-filter-wrap">
+            <label for="category-filter">التصنيف</label>
+            <select id="category-filter"><option value="">كل التصنيفات</option></select>
+          </div>
+          <div class="patient-tools" aria-label="أدوات المريض">
+            <button type="button" class="patient-tool emergency-tool" data-feature="emergency"><span>🚨</span><b>وضع الطوارئ</b><small>أقرب وسائل التواصل</small></button>
+            <button type="button" class="patient-tool" data-feature="alerts"><span>🔔</span><b>نبهني بالتوفر</b><small>تنبيه محلي للدواء</small></button>
+            <button type="button" class="patient-tool" data-feature="alternatives"><span>⇄</span><b>بدائل الدواء</b><small>راجع المادة الفعالة</small></button>
+            <button type="button" class="patient-tool" data-feature="interactions"><span>⚕</span><b>فاحص التداخلات</b><small>إرشاد صيدلي آمن</small></button>
+            <button type="button" class="patient-tool" data-feature="network"><span>↗</span><b>شبكة الصيدليات</b><small>طلب تحويل ومحادثة</small></button>
+            <button type="button" class="patient-tool" data-feature="shortages"><span>⌖</span><b>النواقص والتوقع</b><small>تحليل حدود البيانات</small></button>
+            <button type="button" class="patient-tool" data-feature="reservations"><span>▦</span><b>حجوزاتي</b><small>تذكرة بمدة صلاحية</small></button>
+            <button type="button" class="patient-tool" data-feature="care"><span>♡</span><b>تذكيراتي وعائلتي</b><small>تنظيم الرعاية محليًا</small></button>
+            <button type="button" class="patient-tool" data-feature="tour"><span>✦</span><b>جولة تعريفية</b><small>شرح الموقع خطوة خطوة</small></button>
+            <button type="button" class="patient-tool" data-feature="install" id="install-app"><span>↓</span><b>تثبيت دوائي</b><small>إضافة للشاشة الرئيسية</small></button>
+          </div>
+          <div class="filter-group" id="region-filter-wrap" hidden>
+            <label for="region-filter">المحافظة</label>
+            <select id="region-filter"><option value="">كل المحافظات</option></select>
+          </div>
+          <div class="filter-group">
+            <label for="sort-filter">ترتيب حسب</label>
+            <select id="sort-filter">
+              <option value="name">الاسم أبجديًا</option>
+              <option value="quantity-desc">الكمية الأعلى</option>
+              <option value="quantity-asc">الكمية الأقل</option>
+            </select>
+          </div>
+          <button class="filter-chip" id="favorites-filter" type="button" aria-pressed="false"><span>☆</span> المفضلة فقط</button>
+        </div>
+      </div>
+
+      <div class="results-toolbar">
+        <div><h3 id="results-title">الأدوية</h3><span class="results-count" id="results-count">جارٍ تجهيز البيانات...</span></div>
+        <div class="data-note"><span class="note-mark">i</span><span>المخزون في الملف غير موزّع على فروع بعينها. يُرجى تأكيد التوفر مع الصيدلية.</span></div>
+      </div>
+
+      <div class="results-grid" id="results-grid" aria-live="polite"></div>
+      <div class="empty-state" id="empty-state" hidden>
+        <div class="empty-illustration"><span>⌕</span><i>✦</i></div>
+        <h3>مش لاقيين نتيجة مطابقة</h3><p>جرّب كلمة تانية أو امسح الفلاتر، يمكن تلاقي اللي بتدور عليه.</p>
+        <button class="button button-soft" id="reset-search" type="button">امسح البحث والفلاتر</button>
+      </div>
+      <div class="load-more-wrap"><button class="button button-outline" id="load-more" type="button" hidden>عرض نتائج أكتر <span aria-hidden="true">↓</span></button></div>
+    </section>
+
+    <section class="how-section" id="about">
+      <div class="how-intro">
+        <div class="eyebrow"><span class="eyebrow-icon">✦</span> دوائي باختصار</div>
+        <h2>معلومة مرتبة.<br><span>خطوة أسهل.</span></h2>
+        <p>جمعنا بيانات الأدوية والصيدليات في دليل واحد، عشان البحث يبقى أوضح وأسهل.</p>
+      </div>
+      <div class="steps">
+        <article class="step-card"><span class="step-number">01</span><div class="step-icon search-step">⌕</div><h3>اكتب اللي محتاجه</h3><p>دوّر بالاسم أو التصنيف، والنتايج هتظهر لحظيًا.</p></article>
+        <article class="step-card"><span class="step-number">02</span><div class="step-icon list-step">▤</div><h3>راجع التفاصيل</h3><p>شوف بيانات الصنف أو عنوان الصيدلية ورقم التواصل.</p></article>
+        <article class="step-card"><span class="step-number">03</span><div class="step-icon heart-step">♡</div><h3>اتأكد قبل ما تروح</h3><p>بيانات الملف إرشادية؛ تواصل مع الصيدلية لتأكيد التوفر.</p></article>
+      </div>
+    </section>
+
+    <section class="callout">
+      <div class="callout-mascot" aria-hidden="true"><div class="mascot-capsule"><span></span><i>••</i><b>⌣</b></div><span class="mascot-star">✦</span></div>
+      <div><span class="callout-kicker">دوّي معاك</span><h2>مش متأكد من اسم الدوا؟</h2><p>ابدأ بكتابة أي جزء من الاسم، أو ابحث بتصنيف الدواء.</p></div>
+      <button class="button button-white" id="callout-search" type="button">ابدأ البحث <span aria-hidden="true">←</span></button>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-main">
+      <a class="brand footer-brand" href="#top">
+        <span class="brand-mark" aria-hidden="true"><img src="logo-mark.png" alt=""></span>
+        <span class="brand-copy"><strong>دوائي</strong><small>أقرب لسلامتك</small></span>
+      </a>
+      <p>دليل بسيط يساعدك تلاقي بيانات الدواء والصيدلية اللي محتاجها.</p>
+      <button class="footer-top" type="button" id="back-to-top">ارجع لفوق <span>↑</span></button>
+    </div>
+    <div class="footer-bottom"><span>© <span id="year"></span> دوائي. للاستخدام الإرشادي.</span><span>مش بديل عن استشارة الطبيب أو الصيدلي.</span></div>
+  </footer>
+
+  <nav class="mobile-nav" aria-label="تنقل سريع">
+    <button class="mobile-nav-item active" data-view="medicines"><span>✚</span>الأدوية</button>
+    <button class="mobile-nav-item" data-view="pharmacies"><span>⌖</span>الصيدليات</button>
+    <button class="mobile-nav-item" id="mobile-search"><span>⌕</span>ابحث</button>
+    <button class="mobile-nav-item" id="mobile-theme"><span>◐</span>المظهر</button>
+  </nav>
+
+  <dialog class="detail-dialog" id="detail-dialog" aria-labelledby="dialog-title">
+    <button class="dialog-close" type="button" aria-label="إغلاق">×</button>
+    <div id="dialog-content"></div>
+  </dialog>
+  <dialog class="auth-dialog" id="auth-dialog" aria-labelledby="auth-title">
+    <button class="dialog-close auth-close" type="button" aria-label="إغلاق">×</button>
+    <div id="auth-content"></div>
+  </dialog>
+  <dialog class="feature-dialog" id="feature-dialog" aria-labelledby="feature-title">
+    <button class="dialog-close feature-close" type="button" aria-label="إغلاق">×</button>
+    <div class="feature-content" id="feature-content"></div>
+  </dialog>
+  <button class="assistant-fab" id="assistant-open" type="button" aria-label="اسأل دوّي عن دواء أو صيدلية"><span class="assistant-face">دوّي</span><span class="assistant-fab-label">اسأليني عن أي دواء أو صيدلية</span></button>
+  <div class="tour-shade" id="tour-shade" hidden></div>
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

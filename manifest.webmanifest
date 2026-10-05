@@ -1,0 +1,20 @@
+{
+  "name": "دوائي | أقرب لسلامتك",
+  "short_name": "دوائي",
+  "description": "دليل الأدوية والصيدليات وأدوات رعاية المريض.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f9f8",
+  "theme_color": "#098d80",
+  "icons": [
+    {
+      "src": "logo-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

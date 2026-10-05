@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: dawaey
+    runtime: python
+    plan: starter
+    buildCommand: python -m compileall -q server.py
+    startCommand: python server.py
+    disk:
+      name: dawaey-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: DAWAEY_DB_PATH
+        value: /opt/render/project/src/data/dawaey.sqlite3
+      - key: DAWAEY_COOKIE_SECURE
+        value: "1"
+      - key: DAWAEY_ADMIN_EMAIL
+        sync: false
+      - key: DAWAEY_ADMIN_PASSWORD
+        sync: false
