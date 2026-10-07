@@ -16,8 +16,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <script src="data.js" defer></script>
-  <script src="app.js?v=20261006-pharmacy-stock" defer></script>
-  <script src="features.js?v=20261006-pharmacy-stock-intent2" defer></script>
+  <script src="app.js?v=20261006-auth-first-pharmacy-alerts" defer></script>
+  <script src="features.js?v=20261006-live-orders-bell" defer></script>
 </head>
 <body>
   <div class="announcement"><span class="announcement-dot"></span> دليلك للأدوية والصيدليات — المعلومات حسب ملف البيانات المرفق</div>
@@ -29,9 +29,16 @@
     <nav class="main-nav" aria-label="التنقل الرئيسي">
       <button class="nav-link active" data-view="medicines">الأدوية</button>
       <button class="nav-link" data-view="pharmacies">الصيدليات</button>
+      <button class="nav-link account-nav-link" type="button" data-account-role="patient">حساب مريض</button>
+      <button class="nav-link account-nav-link pharmacy-nav-link" type="button" data-account-role="pharmacy">حساب صيدلية</button>
+      <a class="nav-link admin-nav-link" href="admin.html">لوحة الإدارة</a>
       <a class="nav-link nav-about" href="#about">عن دوائي</a>
     </nav>
     <div class="header-actions">
+      <button class="icon-button notification-bell" id="notifications-open" type="button" aria-label="الإشعارات" title="الإشعارات">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+        <span class="notification-count" id="notification-count" hidden>0</span>
+      </button>
       <button class="button button-account" id="auth-open" type="button">دخول / حساب جديد</button>
       <button class="button button-emergency" id="emergency-open" type="button"><span>!</span> طوارئ</button>
       <button class="icon-button theme-button" id="theme-toggle" type="button" aria-label="تفعيل الوضع الليلي" title="تغيير المظهر">
@@ -126,7 +133,7 @@
             <button type="button" class="patient-tool" data-feature="interactions"><span>⚕</span><b>فاحص التداخلات</b><small>إرشاد صيدلي آمن</small></button>
             <button type="button" class="patient-tool" data-feature="network"><span>↗</span><b>شبكة الصيدليات</b><small>طلب تحويل ومحادثة</small></button>
             <button type="button" class="patient-tool" data-feature="shortages"><span>⌖</span><b>النواقص والتوقع</b><small>تحليل حدود البيانات</small></button>
-            <button type="button" class="patient-tool" data-feature="reservations"><span>▦</span><b>حجوزاتي</b><small>تذكرة بمدة صلاحية</small></button>
+            <button type="button" class="patient-tool" data-feature="reservations"><span>▦</span><b>حجوزاتي</b><small>طلبات حجز متصلة بالصيدليات</small></button>
             <button type="button" class="patient-tool" data-feature="care"><span>♡</span><b>تذكيراتي وعائلتي</b><small>تنظيم الرعاية محليًا</small></button>
             <button type="button" class="patient-tool" data-feature="tour"><span>✦</span><b>جولة تعريفية</b><small>شرح الموقع خطوة خطوة</small></button>
             <button type="button" class="patient-tool" data-feature="install" id="install-app"><span>↓</span><b>تثبيت دوائي</b><small>إضافة للشاشة الرئيسية</small></button>
@@ -196,6 +203,9 @@
   <nav class="mobile-nav" aria-label="تنقل سريع">
     <button class="mobile-nav-item active" data-view="medicines"><span>✚</span>الأدوية</button>
     <button class="mobile-nav-item" data-view="pharmacies"><span>⌖</span>الصيدليات</button>
+    <button class="mobile-nav-item account-mobile-link" type="button" data-account-role="patient"><span>♡</span>حساب مريض</button>
+    <button class="mobile-nav-item account-mobile-link" type="button" data-account-role="pharmacy"><span>✚</span>حساب صيدلية</button>
+    <a class="mobile-nav-item admin-mobile-link" href="admin.html"><span>⚙</span>الإدارة</a>
     <button class="mobile-nav-item" id="mobile-search"><span>⌕</span>ابحث</button>
     <button class="mobile-nav-item" id="mobile-theme"><span>◐</span>المظهر</button>
   </nav>

@@ -16,7 +16,17 @@
     tourStep: 0,
     tourReturnFocus: null,
     chatHistory: [],
-    catalogOpen: true
+    catalogOpen: true,
+    orders: null,
+    notifications: [],
+    deviceNotifications: [],
+    ordersLoading: false,
+    ordersError: "",
+    ordersOwnerId: "",
+    notificationOwnerId: "",
+    notificationLoading: false,
+    notificationError: "",
+    notificationIds: new Set()
   };
   const loadQrLibrary = () => {
     if (window.QRCode) return Promise.resolve(window.QRCode);
@@ -53,6 +63,7 @@
   const DB = {
     alerts: "dawaey-availability-alerts-v1",
     reservations: "dawaey-reservations-v1",
+    deviceNotifications: "dawaey-device-notifications-v1",
     reminders: "dawaey-reminders-v1",
     family: "dawaey-family-v1",
     transfers: "dawaey-transfers-v1",
@@ -113,11 +124,26 @@
     featureState.active = feature;
     renderFeature(feature, options);
     if (!dialog.open) dialog.showModal();
+    if (feature === "notifications") loadNotifications();
   };
   const featureHeader = (kicker, title, description) => `<div class="feature-kicker">${esc(kicker)}</div><h2 class="feature-title" id="feature-title">${esc(title)}</h2><p class="feature-lede">${esc(description)}</p>`;
   const notice = (text, kind = "info") => `<div class="feature-notice ${kind}">${text}</div>`;
   const medicineSelect = (id, label = "اختاري الدواء") => `<div class="feature-field"><label for="${id}">${esc(label)}</label><select id="${id}"><option value="">${esc(label)}</option>${data.medicines.map((medicine) => `<option value="${medicine.id}">${esc(medicine.name)}${medicine.arabicNames ? ` · ${esc(medicine.arabicNames.split(",")[0].trim())}` : ""} · ${esc(medicine.category)}</option>`).join("")}</select></div>`;
   const pharmacySelect = (id, label = "اختاري الصيدلية") => `<div class="feature-field"><label for="${id}">${esc(label)}</label><select id="${id}"><option value="">${esc(label)}</option>${data.pharmacies.map((pharmacy) => `<option value="${pharmacy.id}">${esc(pharmacy.name)} · ${esc(pharmacy.address)}</option>`).join("")}</select></div>`;
+  const orderPharmacySelect = () => {
+    const connected = data.pharmacies.filter((pharmacy) => pharmacy.accountId);
+    return `<div class="feature-field"><label for="reservation-pharmacy">صيدلية معتمدة لاستقبال الطلب</label><select id="reservation-pharmacy" required><option value="">اختاري الصيدلية</option>${connected.map((pharmacy) => `<option value="${esc(pharmacy.accountId)}">${esc(pharmacy.name)} · ${esc(pharmacy.address)}</option>`).join("")}</select></div>`;
+  };
+  const requestApi = async (path, options = {}) => {
+    const response = await fetch(path, {
+      credentials: "same-origin",
+      ...options,
+      headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers }
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "تعذر الاتصال بالخادم.");
+    return result;
+  };
   const getMedicine = (id) => data.medicines.find((item) => item.id === Number(id));
   const getPharmacy = (id) => data.pharmacies.find((item) => item.id === Number(id));
   const shareUrl = (medicine) => {
@@ -174,14 +200,163 @@
   };
 
   const reservationsMarkup = () => {
-    const reservations = getScoped(DB.reservations);
-    const now = Date.now();
-    return `${featureHeader("تذكرة محلية", "حجوزاتي", "إنشاء تذكرة تجريبية بعمر ساعتين للعرض. لن تحجز الدواء فعليًا لدى الصيدلية.")}${notice("رمز التذكرة محلي وغير متصل بنظام صيدلية، ولا يوجد مسح QR أو تحقق حقيقي لدى الفرع.", "warning")}<form class="feature-form" data-form="reservation">${medicineSelect("reservation-medicine")}${pharmacySelect("reservation-pharmacy")}<button class="button button-primary" type="submit">إنشاء تذكرة تجريبية</button></form><h3 class="feature-subheading">التذاكر المحفوظة (${reservations.length})</h3><div class="feature-list">${reservations.length ? reservations.map((reservation) => {
-      const medicine = getMedicine(reservation.medicineId);
-      const pharmacy = getPharmacy(reservation.pharmacyId);
-      const remaining = reservation.expiresAt - now;
-      return `<div class="reservation-ticket"><div class="reservation-qr" data-qr-code="${esc(reservation.token)}" aria-label="رمز QR محلي للتذكرة"></div><span><strong>${esc(medicine?.name)} · ${esc(pharmacy?.name)}</strong><small>${esc(reservation.token)} · ${remaining > 0 ? "صالحة مؤقتًا (تجريبي)" : "انتهت صلاحيتها"}</small>${remaining > 0 ? `<div class="countdown" data-countdown="${esc(reservation.id)}" data-expires="${reservation.expiresAt}">--:--:--</div>` : ""}</span><div class="feature-actions"><button class="button button-outline" type="button" data-share-medicine="${reservation.medicineId}">مشاركة الدواء</button><button class="button button-outline" type="button" data-remove-reservation="${esc(reservation.id)}">إزالة</button></div></div>`;
-    }).join("") : notice("مفيش تذاكر حجز محفوظة.")}</div>`;
+    const account = currentAccount();
+    const ownsLoadedOrders = account?.role === "patient" && featureState.ordersOwnerId === account.id;
+    const orders = ownsLoadedOrders ? featureState.orders || [] : [];
+    const statusLabels = {
+      pending: "بانتظار رد الصيدلية",
+      accepted: "تم الحجز · جاهز للتواصل والاستلام",
+      rejected: "تعذر قبول الطلب",
+      fulfilled: "تم الاستلام",
+      cancelled: "ملغي"
+    };
+    const unread = ownsLoadedOrders ? featureState.notifications.filter((item) => !item.readAt) : [];
+    const bookingForm = account?.role !== "patient"
+      ? notice("سجّلي الدخول بحساب مريض لإرسال طلب حجز فعلي.", "warning")
+      : !data.pharmacies.some((pharmacy) => pharmacy.accountId)
+        ? notice("لا توجد صيدلية مسجلة ومعتمدة لاستقبال الحجوزات بعد. فروع الدليل الثابتة لا تملك حسابات متصلة ولا يمكنها تأكيد طلبك.", "warning")
+        : `<form class="feature-form" data-form="reservation">${medicineSelect("reservation-medicine")}<div class="feature-field"><label for="reservation-quantity">الكمية المطلوبة</label><input id="reservation-quantity" type="number" min="1" max="1000" step="1" value="1" required></div>${orderPharmacySelect()}<div class="feature-field"><label for="reservation-note">ملاحظة للصيدلية (اختياري)</label><textarea id="reservation-note" maxlength="500" placeholder="مثال: وقت مناسب للتواصل"></textarea></div><button class="button button-primary" type="submit">إرسال طلب الحجز للصيدلية</button></form>`;
+    const orderList = featureState.ordersLoading
+      ? notice("جارٍ تحميل طلبات الحجز...")
+      : featureState.ordersError
+        ? notice(esc(featureState.ordersError), "danger")
+        : orders.length
+          ? orders.map((order) => `<article class="feature-item reservation-order">
+              <span class="feature-item-main"><strong>${esc(order.medicineName)} · ${esc(order.pharmacyName)}</strong>
+              <small>الكمية: ${Number(order.quantity).toLocaleString("ar-EG")} · ${esc(statusLabels[order.status] || order.status)}</small>
+              <small>${esc(order.pharmacyAddress || "")} · ${new Date(order.createdAt).toLocaleString("ar-EG")}</small>
+              ${order.note ? `<small>ملاحظتك: ${esc(order.note)}</small>` : ""}
+              ${order.status === "accepted" && order.pharmacyPhone ? `<small>هاتف الصيدلية: <a href="tel:${esc(digits(order.pharmacyPhone))}" dir="ltr">${esc(order.pharmacyPhone)}</a></small>` : ""}
+              </span>${["pending", "accepted"].includes(order.status) ? `<button type="button" data-cancel-order="${esc(order.id)}">إلغاء الطلب</button>` : ""}
+            </article>`).join("")
+          : notice("لم ترسلي طلب حجز بعد.");
+    const notificationsMarkup = unread.length
+      ? `<h3 class="feature-subheading">تحديثات جديدة (${unread.length})</h3><div class="feature-list">${unread.map((item) => `<article class="feature-item"><span class="feature-item-main"><strong>${esc(item.title)}</strong><small>${esc(item.message)}</small></span><button type="button" data-mark-notification="${esc(item.id)}">تمت القراءة</button></article>`).join("")}</div>`
+      : "";
+    return `${featureHeader("طلبات متصلة بالصيدلية", "حجوزاتي", "طلباتك محفوظة على الخادم وتصل مباشرة إلى حساب الصيدلية المعتمدة. يصبح الدواء محجوزًا بعد قبول الصيدلية للطلب.")}${notice("إرسال الطلب لا يؤكد توافر الدواء فورًا؛ انتظري قبول الصيدلية، ثم اتصلي بها للتأكيد قبل التوجه.", "info")}${bookingForm}<h3 class="feature-subheading">طلبات الحجز (${orders.length})</h3><div class="feature-list">${orderList}</div>${notificationsMarkup}`;
+  };
+
+  const loadReservationData = async () => {
+    const account = currentAccount();
+    if (!account || account.role !== "patient" || featureState.ordersLoading) return;
+    if (featureState.ordersOwnerId !== account.id) {
+      featureState.orders = null;
+      featureState.notifications = [];
+      featureState.ordersOwnerId = account.id;
+    }
+    featureState.ordersLoading = true;
+    featureState.ordersError = "";
+    try {
+      const orderResult = await requestApi("/api/orders");
+      featureState.orders = orderResult.orders;
+    } catch (error) {
+      featureState.ordersError = error.message;
+      featureState.orders = [];
+      featureState.ordersOwnerId = "";
+    } finally {
+      featureState.ordersLoading = false;
+      await loadNotifications();
+      if (featureState.active === "reservations" && dialog.open) {
+        content.innerHTML = reservationsMarkup();
+      }
+    }
+  };
+
+  const updateNotificationBell = () => {
+    const button = $("#notifications-open");
+    const badge = $("#notification-count");
+    if (!button || !badge) return;
+    const account = currentAccount();
+    const hasAccount = account && ["patient", "pharmacy"].includes(account.role);
+    const unread = hasAccount
+      ? featureState.notifications.filter((item) => !item.readAt).length
+        + featureState.deviceNotifications.filter((item) => !item.readAt).length
+      : 0;
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? "99+" : String(unread);
+    button.classList.toggle("has-unread", unread > 0);
+    button.setAttribute("aria-label", unread ? `الإشعارات، ${unread} غير مقروء` : "الإشعارات");
+  };
+
+  const notifyNewServerNotification = async (item) => {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      if ("serviceWorker" in navigator) {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(item.title, {
+          body: item.message,
+          icon: "./logo-mark.png",
+          tag: item.id,
+          data: { url: "./" }
+        });
+      } else {
+        new Notification(item.title, { body: item.message, icon: "./logo-mark.png", tag: item.id });
+      }
+    } catch (error) {
+      console.error("تعذر عرض إشعار الحساب في Chrome:", error);
+    }
+  };
+
+  const loadNotifications = async () => {
+    const account = currentAccount();
+    if (!account || !["patient", "pharmacy"].includes(account.role)) {
+      featureState.notificationOwnerId = "";
+      featureState.notifications = [];
+      featureState.deviceNotifications = [];
+      featureState.notificationIds = new Set();
+      updateNotificationBell();
+      return;
+    }
+    if (featureState.notificationLoading) return;
+    featureState.notificationLoading = true;
+    const isNewAccount = featureState.notificationOwnerId !== account.id;
+    if (isNewAccount) {
+      featureState.notificationOwnerId = account.id;
+      featureState.notifications = [];
+      featureState.notificationIds = new Set();
+    }
+    featureState.deviceNotifications = getScoped(DB.deviceNotifications);
+    try {
+      const result = await requestApi("/api/notifications");
+      if (currentAccount()?.id !== account.id) return;
+      const previousIds = featureState.notificationIds;
+      const fresh = isNewAccount ? [] : result.notifications.filter((item) => !previousIds.has(item.id));
+      featureState.notifications = result.notifications;
+      featureState.notificationIds = new Set(result.notifications.map((item) => item.id));
+      featureState.notificationError = "";
+      updateNotificationBell();
+      for (const item of fresh) {
+        await notifyNewServerNotification(item);
+      }
+    } catch (error) {
+      featureState.notificationError = error.message;
+      console.error("تعذر تحميل إشعارات الحساب:", error);
+    } finally {
+      featureState.notificationLoading = false;
+      if (currentAccount()?.id !== featureState.notificationOwnerId) loadNotifications();
+    }
+    if (featureState.active === "notifications" && dialog.open) {
+      content.innerHTML = notificationsMarkup();
+    }
+  };
+
+  const notificationsMarkup = () => {
+    const account = currentAccount();
+    if (!account || !["patient", "pharmacy"].includes(account.role)) {
+      return `${featureHeader("تنبيهات دوائي", "الإشعارات", "سجّلي الدخول لعرض إشعارات حسابك.")}${notice("الإشعارات مرتبطة بحسابك وتظهر هنا بعد تسجيل الدخول.", "warning")}<button class="button button-primary" type="button" data-action="open-account">دخول / حساب جديد</button>`;
+    }
+    const items = [
+      ...featureState.notifications.map((item) => ({ ...item, local: false })),
+      ...featureState.deviceNotifications.map((item) => ({ ...item, local: true }))
+    ].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const unread = items.filter((item) => !item.readAt).length;
+    const list = items.length
+      ? `<div class="feature-list">${items.map((item) => `<article class="feature-item notification-item ${item.readAt ? "" : "is-unread"}">
+          <span class="feature-item-main"><strong>${esc(item.title)}</strong><small>${esc(item.message)}</small><small>${new Date(item.createdAt).toLocaleString("ar-EG")}</small></span>
+          ${item.readAt ? `<span class="notification-read-label">مقروء</span>` : `<button type="button" data-read-notification="${item.local ? "device:" : ""}${esc(item.id)}">تمت القراءة</button>`}
+        </article>`).join("")}</div>`
+      : notice("لا توجد إشعارات حتى الآن.");
+    return `${featureHeader("تنبيهات دوائي", "الإشعارات", "كل تحديثات الحجوزات وحالة حساب الصيدلية هنا، مع إشعارات Chrome عند السماح بها.")}${featureState.notificationError ? notice(esc(featureState.notificationError), "danger") : ""}${notice(`${unread} إشعار غير مقروء. يتم تحديث القائمة تلقائيًا أثناء فتح الموقع.`, "info")}${list}`;
   };
 
   const careMarkup = (tab = "reminders") => {
@@ -193,7 +368,7 @@
     return `${featureHeader("رعاية أسهل", "التذكيرات والعائلة", "نظّمي تذكيراتك وملفات العائلة محليًا على هذا الجهاز.")}<div class="care-tabs"><button type="button" class="care-tab ${tab === "reminders" ? "active" : ""}" data-care-tab="reminders">تذكيراتي</button><button type="button" class="care-tab ${tab === "family" ? "active" : ""}" data-care-tab="family">العائلة (${family.length})</button></div><div class="care-panel">${panel}</div>`;
   };
 
-  const installMarkup = () => `${featureHeader("دوائي على جهازك", "تثبيت واستخدام دون اتصال", "يمكن تثبيت الموقع كـ PWA على المتصفحات الداعمة بعد زيارة الموقع عبر HTTPS أو localhost.")}${notice("سيتم حفظ ملفات الواجهة وقائمة الأدوية للعمل دون اتصال جزئيًا. البحث والدليل يعملان من البيانات المدمجة. إرسال SMS أو تنبيهات Push من الخادم غير متاح في النسخة الثابتة.")}<div class="feature-actions"><button type="button" class="button button-primary" data-action="install-confirm">تثبيت التطبيق</button><button type="button" class="button button-outline" data-action="enable-notifications">تفعيل إشعارات الجهاز</button></div><div class="feature-list"><div class="feature-item"><span class="feature-item-main"><strong>على iPhone / iPad</strong><small>من Safari اختاري مشاركة ثم «إضافة إلى الشاشة الرئيسية».</small></span></div><div class="feature-item"><span class="feature-item-main"><strong>على Android</strong><small>استخدمي خيار تثبيت التطبيق في قائمة Chrome، إذا ظهر.</small></span></div></div>`;
+  const installMarkup = () => `${featureHeader("دوائي على جهازك", "تثبيت واستخدام دون اتصال", "يمكن تثبيت الموقع كـ PWA على المتصفحات الداعمة بعد زيارة الموقع عبر HTTPS أو localhost.")}${notice("سيتم حفظ ملفات الواجهة وقائمة الأدوية للعمل دون اتصال جزئيًا. يظهر جرس الإشعارات داخل الموقع، ويمكن عرض تنبيه Chrome عند فتح الموقع والسماح بالإشعارات. لا توجد إشعارات دفع من الخادم عندما يكون الموقع مغلقًا.")}<div class="feature-actions"><button type="button" class="button button-primary" data-action="install-confirm">تثبيت التطبيق</button><button type="button" class="button button-outline" data-action="enable-notifications">تفعيل إشعارات الجهاز</button></div><div class="feature-list"><div class="feature-item"><span class="feature-item-main"><strong>على iPhone / iPad</strong><small>من Safari اختاري مشاركة ثم «إضافة إلى الشاشة الرئيسية».</small></span></div><div class="feature-item"><span class="feature-item-main"><strong>على Android</strong><small>استخدمي خيار تثبيت التطبيق في قائمة Chrome، إذا ظهر.</small></span></div></div>`;
 
   const renderFeature = (feature, options = {}) => {
     if (!data) return;
@@ -204,6 +379,7 @@
     else if (feature === "network") content.innerHTML = networkMarkup();
     else if (feature === "shortages") content.innerHTML = shortageMarkup();
     else if (feature === "reservations") content.innerHTML = reservationsMarkup();
+    else if (feature === "notifications") content.innerHTML = notificationsMarkup();
     else if (feature === "care") content.innerHTML = careMarkup(options.tab || "reminders");
     else if (feature === "install") content.innerHTML = installMarkup();
     else if (feature === "assistant") content.innerHTML = assistantMarkup();
@@ -211,7 +387,7 @@
     else if (feature === "image") content.innerHTML = imageMarkup();
     else if (feature === "tour") content.innerHTML = tourContentMarkup();
     refreshCountdowns();
-    if (feature === "reservations") renderQrCodes();
+    if (feature === "reservations") loadReservationData();
   };
 
   const assistantMarkup = () => {
@@ -452,7 +628,7 @@
     try {
       const permission = await Notification.requestPermission();
       if (permission === "granted") {
-        toast("تم تفعيل إشعارات الجهاز المحلية. لا توجد إشعارات دفع من خادم.");
+        toast("تم تفعيل إشعارات Chrome؛ ستظهر التذكيرات وتحديثات الحساب في الجرس أيضًا.");
         return permission;
       }
       toast(permission === "denied" ? "الإشعارات مرفوضة من إعدادات المتصفح." : "لم يتم تفعيل الإشعارات.");
@@ -464,16 +640,43 @@
     }
   };
   const showLocalNotification = async (title, body, tag) => {
-    if (!("Notification" in window)) return false;
-    if (Notification.permission !== "granted") return false;
     try {
-      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-        const registration = await navigator.serviceWorker.ready;
-        await registration.showNotification(title, { body, icon: "./logo-mark.png", tag });
-      } else new Notification(title, { body, icon: "./logo-mark.png", tag });
+      const item = {
+        id: String(tag),
+        title,
+        message: body,
+        createdAt: new Date().toISOString(),
+        readAt: null
+      };
+      const saved = getScoped(DB.deviceNotifications);
+      if (!saved.some((entry) => entry.id === item.id)) {
+        saved.unshift(item);
+        if (!putValue(scopedKey(DB.deviceNotifications), saved.slice(0, 100))) return false;
+      }
+      const account = currentAccount();
+      if (account?.id === featureState.notificationOwnerId) {
+        featureState.deviceNotifications = getScoped(DB.deviceNotifications);
+        updateNotificationBell();
+        if (featureState.active === "notifications" && dialog.open) {
+          content.innerHTML = notificationsMarkup();
+        }
+      }
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          if ("serviceWorker" in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification(title, {
+              body, icon: "./logo-mark.png", tag,
+              data: { url: "./" }
+            });
+          } else new Notification(title, { body, icon: "./logo-mark.png", tag });
+        } catch (error) {
+          console.error("تعذر إظهار إشعار Chrome:", error);
+        }
+      }
       return true;
     } catch (error) {
-      console.error("تعذر إظهار إشعار محلي:", error);
+      console.error("تعذر حفظ إشعار المتصفح داخل دوائي:", error);
       return false;
     }
   };
@@ -519,15 +722,20 @@
       setScoped(DB.transfers, requests);
       renderTransferChat(item.id);
     } else if (form.dataset.form === "reservation") {
+      const account = currentAccount();
       const medicineId = Number($("#reservation-medicine").value);
-      const pharmacyId = Number($("#reservation-pharmacy").value);
-      if (!medicineId || !pharmacyId) return toast("اختاري الدواء والصيدلية.");
-      const reservations = getScoped(DB.reservations);
-      reservations.unshift({ id: `reservation-${crypto.randomUUID?.() || Date.now()}`, token: `DW-${Math.random().toString(36).slice(2, 10).toUpperCase()}`, medicineId, pharmacyId, createdAt: Date.now(), expiresAt: Date.now() + 2 * 60 * 60 * 1000 });
-      if (setScoped(DB.reservations, reservations)) {
-        renderFeature("reservations");
-        toast("اتعملت تذكرة محلية، لكنها ليست حجزًا فعليًا.");
-      }
+      const pharmacyId = $("#reservation-pharmacy").value;
+      const quantity = Number($("#reservation-quantity").value);
+      if (account?.role !== "patient") return toast("سجّلي الدخول بحساب مريض لإرسال طلب الحجز.");
+      if (!medicineId || !pharmacyId || !Number.isInteger(quantity) || quantity < 1 || quantity > 1000) return toast("راجعي الدواء والصيدلية والكمية المطلوبة.");
+      await requestApi("/api/orders", {
+        method: "POST",
+        body: JSON.stringify({ medicineId, pharmacyId, quantity, note: $("#reservation-note").value.trim() })
+      });
+      featureState.orders = null;
+      featureState.ordersLoading = false;
+      renderFeature("reservations");
+      toast("وصل طلب الحجز للصيدلية. تابعي حالته من هنا.");
     } else if (form.dataset.form === "reminder") {
       const medicineId = Number($("#reminder-medicine").value);
       const time = $("#reminder-time").value;
@@ -597,7 +805,9 @@
     } else if (action === "pharmacies") {
       dialog.close();
       $("#tab-pharmacies").click();
-    } else if (["emergency", "care", "interactions", "network", "reservations", "alternatives", "assistant"].includes(action)) {
+    } else if (action === "open-account") {
+      $("#auth-open").click();
+    } else if (["emergency", "care", "interactions", "network", "reservations", "notifications", "alternatives", "assistant"].includes(action)) {
       showDialog(action);
     }
   };
@@ -606,7 +816,7 @@
     event.preventDefault();
     handleFeatureSubmit(event.target).catch((error) => {
       console.error("تعذر تنفيذ أداة المريض:", error);
-      toast("تعذر تنفيذ الخطوة. حاولي مرة تانية.");
+      toast(error.message || "تعذر تنفيذ الخطوة. حاولي مرة تانية.");
     });
   });
   content.addEventListener("click", (event) => {
@@ -640,10 +850,48 @@
       if (setScoped(DB.alerts, alerts)) renderFeature("alerts");
       return;
     }
-    const removeReservation = event.target.closest("[data-remove-reservation]");
-    if (removeReservation) {
-      const reservations = getScoped(DB.reservations).filter((item) => item.id !== removeReservation.dataset.removeReservation);
-      if (setScoped(DB.reservations, reservations)) renderFeature("reservations");
+    const notificationButton = event.target.closest("[data-read-notification]");
+    if (notificationButton) {
+      const id = notificationButton.dataset.readNotification;
+      if (id.startsWith("device:")) {
+        const localId = id.slice("device:".length);
+        const updated = getScoped(DB.deviceNotifications).map((item) => item.id === localId
+          ? { ...item, readAt: new Date().toISOString() }
+          : item);
+        if (putValue(scopedKey(DB.deviceNotifications), updated)) {
+          featureState.deviceNotifications = updated;
+          updateNotificationBell();
+          renderFeature("notifications");
+        }
+      } else {
+        requestApi(`/api/notifications/${encodeURIComponent(id)}`, {
+          method: "PATCH", body: JSON.stringify({ read: true })
+        }).then(() => loadNotifications()).catch((error) => toast(error.message));
+      }
+      return;
+    }
+    const cancelOrder = event.target.closest("[data-cancel-order]");
+    if (cancelOrder) {
+      requestApi(`/api/orders/${encodeURIComponent(cancelOrder.dataset.cancelOrder)}`, {
+        method: "PATCH", body: JSON.stringify({ status: "cancelled" })
+      }).then(() => {
+        featureState.orders = null;
+        featureState.ordersLoading = false;
+        renderFeature("reservations");
+        toast("تم إلغاء طلب الحجز.");
+      }).catch((error) => toast(error.message));
+      return;
+    }
+    const readNotification = event.target.closest("[data-mark-notification]");
+    if (readNotification) {
+      requestApi(`/api/notifications/${encodeURIComponent(readNotification.dataset.markNotification)}`, {
+        method: "PATCH", body: JSON.stringify({ read: true })
+      }).then(() => {
+        featureState.notifications = featureState.notifications.map((item) => item.id === readNotification.dataset.markNotification
+          ? { ...item, readAt: new Date().toISOString() }
+          : item);
+        renderFeature("reservations");
+      }).catch((error) => toast(error.message));
       return;
     }
     const removeReminder = event.target.closest("[data-remove-reminder]");
@@ -718,11 +966,21 @@
     showDialog(button.dataset.feature);
   }));
   $("#emergency-open").addEventListener("click", () => showDialog("emergency"));
+  $("#notifications-open").addEventListener("click", () => {
+    if (!currentAccount()) {
+      $("#auth-open").click();
+      return;
+    }
+    showDialog("notifications");
+  });
   dialog.querySelector(".feature-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   $("#assistant-open").addEventListener("click", () => showDialog("assistant"));
   document.addEventListener("dawaey:feature", (event) => {
     if (event.detail?.feature) showDialog(event.detail.feature, event.detail.options || {});
+  });
+  document.addEventListener("dawaey:account-changed", () => {
+    loadNotifications();
   });
 
   const beforeInstall = (event) => {
@@ -756,8 +1014,12 @@
     if (changed) setScoped(DB.reminders, reminders);
   };
   window.setInterval(() => { updateReminders().catch((error) => console.error("تعذر فحص تذكيرات الجرعات:", error)); }, 30000);
+  window.setInterval(() => { loadNotifications(); }, 30000);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) updateReminders().catch((error) => console.error("تعذر تحديث التذكيرات:", error));
+    if (!document.hidden) {
+      updateReminders().catch((error) => console.error("تعذر تحديث التذكيرات:", error));
+      loadNotifications();
+    }
   });
 
   let hotTourShown = false;
@@ -792,4 +1054,5 @@
       $("#instant-search-status").textContent = "يمكن استخدام الموقع الآن؛ لم يتم تفعيل التخزين دون اتصال.";
     });
   }
+  updateNotificationBell();
 })();

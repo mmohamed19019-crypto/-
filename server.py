@@ -281,6 +281,30 @@ def initialize_database():
                 reporter_id TEXT NOT NULL REFERENCES users(id),
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS orders (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL REFERENCES users(id),
+                pharmacy_id TEXT NOT NULL REFERENCES users(id),
+                medicine_id INTEGER NOT NULL REFERENCES medicines(id),
+                quantity INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 1000),
+                note TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','accepted','rejected','fulfilled','cancelled')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                recipient_role TEXT NOT NULL CHECK (recipient_role IN ('admin','patient','pharmacy')),
+                recipient_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                related_type TEXT NOT NULL,
+                related_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                read_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actor_id TEXT NOT NULL,
@@ -295,6 +319,9 @@ def initialize_database():
             CREATE INDEX IF NOT EXISTS idx_users_role_status ON users(role, status);
             CREATE INDEX IF NOT EXISTS idx_shortage_area ON shortage_reports(governorate, medicine_id);
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(id DESC);
+            CREATE INDEX IF NOT EXISTS idx_orders_patient_created ON orders(patient_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_orders_pharmacy_created ON orders(pharmacy_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_role, recipient_id, created_at DESC);
             """
         )
         migrate_role_scoped_user_contacts(db)
@@ -395,6 +422,10 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
             if path == "/api/auth/session":
                 user = self.require_user()
                 return self.json_response(HTTPStatus.OK, {"user": user})
+            if path == "/api/orders":
+                return self.list_orders(self.require_user())
+            if path == "/api/notifications":
+                return self.list_notifications(self.require_user())
             if path == "/api/admin/session":
                 user = self.require_admin()
                 return self.json_response(HTTPStatus.OK, {"user": user})
@@ -422,6 +453,8 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/auth/register":
                 return self.register(body)
+            if path == "/api/orders":
+                return self.create_order(body, self.require_user())
             if path == "/api/auth/login":
                 return self.login(body)
             if path == "/api/auth/logout":
@@ -485,6 +518,21 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
             self.check_origin()
             body = self.read_json()
             path = urlsplit(self.path).path
+            notification = re.fullmatch(r"/api/notifications/([^/]+)", path)
+            if notification:
+                return self.mark_notification_read(
+                    unquote(notification.group(1)), body, self.require_user()
+                )
+            admin_notification = re.fullmatch(r"/api/admin/notifications/([^/]+)", path)
+            if admin_notification:
+                return self.mark_notification_read(
+                    unquote(admin_notification.group(1)), body, self.require_admin()
+                )
+            order = re.fullmatch(r"/api/orders/([^/]+)", path)
+            if order:
+                return self.update_order_status(
+                    unquote(order.group(1)), body, self.require_user()
+                )
             actor = self.require_admin()
             pharmacy = re.fullmatch(r"/api/admin/pharmacies/([^/]+)", path)
             if pharmacy:
@@ -781,6 +829,12 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
                     log_action(db, {"id": user_id, "contact": contact}, "pharmacy_application_submitted", "user", user_id, {
                         "pharmacyName": profile["pharmacyName"], "governorate": profile["governorate"],
                     })
+                    self.create_notification(
+                        db, "admin", None, "pharmacy_application",
+                        "طلب تسجيل صيدلية جديد",
+                        f"{profile['pharmacyName']} — {profile['governorate']}، {profile['area']}",
+                        "pharmacy", user_id,
+                    )
                 else:
                     log_action(db, {"id": user_id, "contact": contact}, "patient_account_created", "user", user_id, {
                         "governorate": profile.get("governorate"),
@@ -836,10 +890,57 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
         with db_connect() as db:
             row = db.execute("SELECT profile FROM users WHERE id=?", (actor["id"],)).fetchone()
             current = json.loads(row["profile"])
+            inventory_changes = []
+            if actor["role"] == "pharmacy" and "pharmacyInventory" in updates:
+                previous_inventory = current.get("pharmacyInventory", [])
+                previous_quantities = {
+                    item.get("medicineId"): item.get("quantity")
+                    for item in previous_inventory if isinstance(item, dict)
+                }
+                next_quantities = {
+                    item["medicineId"]: item["quantity"] for item in updates["pharmacyInventory"]
+                }
+                changed_ids = {
+                    medicine_id
+                    for medicine_id in previous_quantities.keys() | next_quantities.keys()
+                    if previous_quantities.get(medicine_id) != next_quantities.get(medicine_id)
+                }
+                if changed_ids:
+                    placeholders = ",".join("?" for _ in changed_ids)
+                    medicines = {
+                        medicine["id"]: medicine
+                        for medicine in db.execute(
+                            f"SELECT id,name,unit FROM medicines WHERE id IN ({placeholders})",
+                            tuple(sorted(changed_ids)),
+                        )
+                    }
+                    inventory_changes = [
+                        (
+                            medicines[medicine_id]["name"],
+                            next_quantities.get(medicine_id),
+                            medicines[medicine_id]["unit"],
+                        )
+                        for medicine_id in sorted(changed_ids)
+                    ]
             current.update(updates)
             db.execute("UPDATE users SET profile=?,updated_at=? WHERE id=?", (json.dumps(current, ensure_ascii=False), now_iso(), actor["id"]))
             saved = db.execute("SELECT * FROM users WHERE id=?", (actor["id"],)).fetchone()
             log_action(db, actor, "profile_updated", "user", actor["id"], {"fields": sorted(updates)})
+            if inventory_changes:
+                pharmacy_name = current.get("pharmacyName", "صيدلية")
+                medicines_text = "، ".join(
+                    f"{name}: {'إزالة من القائمة' if quantity is None else f'{quantity} {unit}'}"
+                    for name, quantity, unit in inventory_changes
+                )
+                self.create_notification(
+                    db, "admin", None, "pharmacy_inventory_updated",
+                    "تحديث مخزون صيدلية",
+                    f"{pharmacy_name} حدّثت بيانات مخزونها: {medicines_text}.",
+                    "pharmacy_inventory", actor["id"],
+                )
+                log_action(db, actor, "pharmacy_inventory_updated", "user", actor["id"], {
+                    "medicineIds": sorted(changed_ids),
+                })
         return self.json_response(HTTPStatus.OK, {"user": safe_user(saved)})
 
     def check_login_limit(self, contact):
@@ -893,7 +994,7 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
                 "address": profile["governorate"] + " - " + profile["area"] + " - " + profile["address"],
                 "phone": profile["phone"], "whatsapp": profile["whatsapp"],
                 "openingTime": profile["openingTime"], "closingTime": profile["closingTime"],
-                "governorate": profile["governorate"],
+                "governorate": profile["governorate"], "accountId": row["id"],
             })
             next_id += 1
         payload = json.dumps({"source": "dawaey-central-database", "medicines": medicines, "pharmacies": pharmacies}, ensure_ascii=False)
@@ -923,12 +1024,197 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
                 """SELECT id,actor_id AS actorId,actor_contact AS actorContact,action,target_type AS targetType,
                 target_id AS targetId,details,created_at AS createdAt FROM audit_log ORDER BY id DESC LIMIT 200"""
             )]
+            orders = self.query_orders(db, "admin", None)
+            notifications = self.query_notifications(db, "admin", None)
         for row in audit:
             row["details"] = json.loads(row["details"])
         return self.json_response(HTTPStatus.OK, {
             "users": users, "medicines": medicines, "reports": reports,
             "audit": audit, "governorates": GOVERNORATES,
+            "orders": orders, "notifications": notifications,
+            "adminWhatsApp": normalize_contact(os.environ.get("DAWAEY_ADMIN_WHATSAPP", "01030607046")),
         })
+
+    def create_notification(self, db, recipient_role, recipient_id, kind, title, message, related_type, related_id):
+        db.execute(
+            """INSERT INTO notifications
+            (id,recipient_role,recipient_id,kind,title,message,related_type,related_id,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                "notification_" + secrets.token_hex(12), recipient_role, recipient_id,
+                kind, title[:160], message[:500], related_type, str(related_id), now_iso(),
+            ),
+        )
+
+    def query_notifications(self, db, role, user_id):
+        rows = db.execute(
+            """SELECT id,kind,title,message,related_type AS relatedType,
+            related_id AS relatedId,created_at AS createdAt,read_at AS readAt
+            FROM notifications
+            WHERE recipient_role=? AND (recipient_id IS NULL OR recipient_id=?)
+            ORDER BY created_at DESC LIMIT 200""",
+            (role, user_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_notifications(self, actor):
+        with db_connect() as db:
+            notifications = self.query_notifications(db, actor["role"], actor["id"])
+        return self.json_response(HTTPStatus.OK, {"notifications": notifications})
+
+    def mark_notification_read(self, notification_id, body, actor):
+        if body.get("read") is not True:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "حالة الإشعار غير صالحة.")
+        with db_connect() as db:
+            cursor = db.execute(
+                """UPDATE notifications SET read_at=COALESCE(read_at,?)
+                WHERE id=? AND recipient_role=? AND (recipient_id IS NULL OR recipient_id=?)""",
+                (now_iso(), notification_id, actor["role"], actor["id"]),
+            )
+            if not cursor.rowcount:
+                raise ApiError(HTTPStatus.NOT_FOUND, "الإشعار غير موجود.")
+        return self.json_response(HTTPStatus.OK, {"ok": True})
+
+    def query_orders(self, db, role, user_id):
+        query = """SELECT o.id,o.patient_id AS patientId,o.pharmacy_id AS pharmacyId,
+            o.medicine_id AS medicineId,m.name AS medicineName,m.unit,
+            o.quantity,o.note,o.status,o.created_at AS createdAt,o.updated_at AS updatedAt,
+            patient.contact AS patientContact,patient.phone AS patientPhone,
+            patient.profile AS patientProfile,
+            pharmacy_profile.profile AS pharmacyProfile
+            FROM orders o JOIN medicines m ON m.id=o.medicine_id
+            JOIN users patient ON patient.id=o.patient_id
+            JOIN users pharmacy_profile ON pharmacy_profile.id=o.pharmacy_id
+            WHERE 1=1"""
+        params = []
+        if role == "patient":
+            query += " AND o.patient_id=?"
+            params.append(user_id)
+        elif role == "pharmacy":
+            query += " AND o.pharmacy_id=?"
+            params.append(user_id)
+        query += " ORDER BY o.created_at DESC LIMIT 200"
+        orders = []
+        for row in db.execute(query, params).fetchall():
+            item = dict(row)
+            patient_profile = json.loads(item.pop("patientProfile"))
+            pharmacy_profile = json.loads(item.pop("pharmacyProfile"))
+            item["pharmacyName"] = pharmacy_profile.get("pharmacyName", "")
+            item["patientName"] = patient_profile.get("name", "")
+            item["pharmacyPhone"] = pharmacy_profile.get("phone", "")
+            item["pharmacyWhatsapp"] = pharmacy_profile.get("whatsapp", "")
+            item["pharmacyAddress"] = " - ".join(filter(None, (
+                pharmacy_profile.get("governorate", ""),
+                pharmacy_profile.get("area", ""),
+                pharmacy_profile.get("address", ""),
+            )))
+            if role == "patient":
+                item.pop("patientId", None)
+                item.pop("pharmacyId", None)
+                item.pop("patientContact", None)
+                item.pop("patientPhone", None)
+            elif role == "pharmacy":
+                item.pop("pharmacyId", None)
+            orders.append(item)
+        return orders
+
+    def list_orders(self, actor):
+        with db_connect() as db:
+            orders = self.query_orders(db, actor["role"], actor["id"])
+        return self.json_response(HTTPStatus.OK, {"orders": orders})
+
+    def create_order(self, body, actor):
+        if actor["role"] != "patient":
+            raise ApiError(HTTPStatus.FORBIDDEN, "طلب حجز الدواء متاح لحساب المريض فقط.")
+        medicine_id = body.get("medicineId")
+        pharmacy_id = body.get("pharmacyId")
+        quantity = body.get("quantity")
+        note = body.get("note", "")
+        if (isinstance(medicine_id, bool) or not isinstance(medicine_id, int)
+                or not isinstance(pharmacy_id, str) or not pharmacy_id or len(pharmacy_id) > 100
+                or isinstance(quantity, bool) or not isinstance(quantity, int)
+                or not 1 <= quantity <= 1000 or not isinstance(note, str) or len(note) > 500):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "اختاري دواءً وكمية من ١ إلى ١٠٠٠، واكتبي ملاحظة لا تتجاوز ٥٠٠ حرفًا.")
+        note = note.strip()
+        order_id = "order_" + secrets.token_hex(12)
+        with db_connect() as db:
+            medicine = db.execute("SELECT name FROM medicines WHERE id=?", (medicine_id,)).fetchone()
+            pharmacy = db.execute(
+                "SELECT * FROM users WHERE id=? AND role='pharmacy' AND status='approved'",
+                (pharmacy_id,),
+            ).fetchone()
+            if not medicine:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "الدواء المختار غير موجود في الدليل.")
+            if not pharmacy:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "اختاري صيدلية مسجلة ومعتمدة من الإدارة.")
+            pharmacy_name = json.loads(pharmacy["profile"]).get("pharmacyName", "الصيدلية")
+            db.execute(
+                """INSERT INTO orders
+                (id,patient_id,pharmacy_id,medicine_id,quantity,note,status,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,'pending',?,?)""",
+                (order_id, actor["id"], pharmacy_id, medicine_id, quantity, note, now_iso(), now_iso()),
+            )
+            message = f"طلب حجز {quantity} من {medicine['name']} لدى {pharmacy_name}."
+            self.create_notification(db, "pharmacy", pharmacy_id, "order_created", "طلب حجز جديد", message, "order", order_id)
+            self.create_notification(db, "admin", None, "order_created", "طلب حجز جديد", message, "order", order_id)
+            log_action(db, actor, "order_created", "order", order_id, {
+                "medicineId": medicine_id, "pharmacyId": pharmacy_id, "quantity": quantity,
+            })
+            orders = self.query_orders(db, "patient", actor["id"])
+        created_order = next(order for order in orders if order["id"] == order_id)
+        return self.json_response(HTTPStatus.CREATED, {"order": created_order})
+
+    def update_order_status(self, order_id, body, actor):
+        status = body.get("status")
+        allowed_statuses = ("accepted", "rejected", "fulfilled", "cancelled")
+        if status not in allowed_statuses:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "حالة طلب الحجز غير صالحة.")
+        with db_connect() as db:
+            row = db.execute(
+                """SELECT o.*,m.name AS medicine_name,patient.contact AS patient_contact,
+                patient.profile AS patient_profile,pharmacy.profile AS pharmacy_profile
+                FROM orders o JOIN medicines m ON m.id=o.medicine_id
+                JOIN users patient ON patient.id=o.patient_id
+                JOIN users pharmacy ON pharmacy.id=o.pharmacy_id WHERE o.id=?""",
+                (order_id,),
+            ).fetchone()
+            if not row:
+                raise ApiError(HTTPStatus.NOT_FOUND, "طلب الحجز غير موجود.")
+            if actor["role"] == "pharmacy" and actor["id"] == row["pharmacy_id"]:
+                allowed = {
+                    "pending": ("accepted", "rejected"),
+                    "accepted": ("fulfilled",),
+                }
+                recipient_role, recipient_id = "patient", row["patient_id"]
+            elif actor["role"] == "patient" and actor["id"] == row["patient_id"]:
+                allowed = {"pending": ("cancelled",), "accepted": ("cancelled",)}
+                recipient_role, recipient_id = "pharmacy", row["pharmacy_id"]
+            else:
+                raise ApiError(HTTPStatus.FORBIDDEN, "لا تملكين صلاحية تعديل طلب الحجز ده.")
+            if status not in allowed.get(row["status"], ()):
+                raise ApiError(HTTPStatus.CONFLICT, "لا يمكن نقل طلب الحجز من حالته الحالية إلى الحالة المطلوبة.")
+            db.execute("UPDATE orders SET status=?,updated_at=? WHERE id=?", (status, now_iso(), order_id))
+            pharmacy_name = json.loads(row["pharmacy_profile"]).get("pharmacyName", "الصيدلية")
+            patient_name = json.loads(row["patient_profile"]).get("name", "المريض")
+            status_text = {
+                "accepted": "قبلت الصيدلية الطلب وتم حجزه بانتظار الاستلام",
+                "rejected": "تعذر على الصيدلية قبول الطلب",
+                "fulfilled": "تم تسجيل الطلب كمستلم",
+                "cancelled": "تم إلغاء الطلب",
+            }[status]
+            message = f"{status_text}: {row['medicine_name']} لدى {pharmacy_name}."
+            self.create_notification(
+                db, recipient_role, recipient_id, "order_" + status,
+                "تحديث طلب الحجز", message, "order", order_id,
+            )
+            self.create_notification(
+                db, "admin", None, "order_" + status,
+                "تحديث طلب حجز", f"{patient_name}: {message}", "order", order_id,
+            )
+            log_action(db, actor, "order_" + status, "order", order_id, {"status": status})
+            orders = self.query_orders(db, actor["role"], actor["id"])
+        updated_order = next(order for order in orders if order["id"] == order_id)
+        return self.json_response(HTTPStatus.OK, {"order": updated_order})
 
     def review_pharmacy(self, user_id, body, actor):
         decision = body.get("decision")
@@ -946,6 +1232,11 @@ class DawaeyHandler(SimpleHTTPRequestHandler):
             log_action(db, actor, "pharmacy_" + decision, "user", user_id, {
                 "pharmacyName": json.loads(row["profile"]).get("pharmacyName"), "reason": reason,
             })
+            decision_text = "تم اعتماد طلب تسجيل الصيدلية" if decision == "approved" else f"تم رفض الطلب: {reason}"
+            self.create_notification(
+                db, "pharmacy", user_id, "pharmacy_" + decision,
+                "تحديث طلب الانضمام", decision_text, "pharmacy", user_id,
+            )
             updated = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return self.json_response(HTTPStatus.OK, {"user": safe_user(updated)})
 

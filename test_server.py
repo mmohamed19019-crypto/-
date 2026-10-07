@@ -252,13 +252,26 @@ class AdminApiTests(unittest.TestCase):
             "expectedRole": "pharmacy",
         })["user"]
         self.assertEqual(restored["pharmacyInventory"], inventory_response["pharmacyInventory"])
-
         self.api(self.admin, "/api/admin/login", "POST", {
             "contact": "admin@example.test", "password": "AdminPass123456",
         })
         self.api(self.admin, f"/api/admin/pharmacies/{pharmacy['id']}", "PATCH", {
             "decision": "approved",
         })
+        inventory_notice = next(
+            item for item in self.api(self.admin, "/api/admin/overview")["notifications"]
+            if item["kind"] == "pharmacy_inventory_updated"
+            and item["relatedId"] == pharmacy["id"]
+        )
+        self.assertIn("صيدلية الاسم الكامل للاختبار", inventory_notice["message"])
+        self.assertIn("7", inventory_notice["message"])
+        self.assertIn("Panadol", inventory_notice["message"])
+        notification_count = self.api(self.admin, "/api/admin/overview")["notifications"]
+        self.assertEqual(
+            sum(item["kind"] == "pharmacy_inventory_updated" and item["relatedId"] == pharmacy["id"]
+                for item in notification_count),
+            1,
+        )
         with self.admin.open(self.base + "/data.js") as response:
             data_script = response.read().decode("utf-8")
         catalog = json.loads(data_script.removeprefix("window.DAWAEY_DATA = ").rstrip().removesuffix(";"))
@@ -266,6 +279,97 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(listed["whatsapp"], "01045678902")
         self.assertEqual(listed["openingTime"], "09:00")
         self.assertEqual(listed["closingTime"], "22:00")
+
+    def test_patient_orders_reach_approved_pharmacy_and_notify_each_party(self):
+        patient = self.api(self.patient, "/api/auth/register", "POST", {
+            "role": "patient", "contact": "01056789012", "password": "PatientPass123",
+            "profile": {"name": "مريضة الحجز", "governorate": "القاهرة", "area": "المعادي"},
+        }, expected=201)["user"]
+        self.api(self.patient, "/api/auth/logout", "POST", {})
+        pharmacy = self.api(self.patient, "/api/auth/register", "POST", {
+            "role": "pharmacy", "contact": "01056789013", "password": "PharmacyPass123",
+            "profile": {
+                "pharmacyName": "صيدلية الحجز", "license": "LIC-ORDER-1",
+                "phone": "01056789013", "whatsapp": "01056789014",
+                "governorate": "القاهرة", "area": "المعادي", "address": "شارع الحجز",
+                "openingTime": "09:00", "closingTime": "22:00",
+            },
+        }, expected=201)["user"]
+        self.api(self.patient, "/api/auth/login", "POST", {
+            "contact": "01056789012", "password": "PatientPass123", "expectedRole": "patient",
+        })
+        self.api(self.patient, "/api/orders", "POST", {
+            "medicineId": 1, "pharmacyId": pharmacy["id"], "quantity": 1,
+        }, expected=400)
+        self.api(self.patient, "/api/auth/logout", "POST", {})
+        self.api(self.admin, "/api/admin/login", "POST", {
+            "contact": "admin@example.test", "password": "AdminPass123456",
+        })
+        self.api(self.admin, f"/api/admin/pharmacies/{pharmacy['id']}", "PATCH", {
+            "decision": "approved", "reason": "",
+        })
+        reviewed_pharmacy = next(
+            user for user in self.api(self.admin, "/api/admin/overview")["users"]
+            if user["id"] == pharmacy["id"]
+        )
+        self.assertEqual(reviewed_pharmacy["license"], "LIC-ORDER-1")
+        self.assertEqual(reviewed_pharmacy["phone"], "01056789013")
+        self.assertEqual(reviewed_pharmacy["whatsapp"], "01056789014")
+        self.assertEqual(reviewed_pharmacy["address"], "شارع الحجز")
+        self.assertEqual(reviewed_pharmacy["openingTime"], "09:00")
+        self.assertEqual(reviewed_pharmacy["closingTime"], "22:00")
+
+        pharmacy_session = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.api(pharmacy_session, "/api/auth/login", "POST", {
+            "contact": "01056789013", "password": "PharmacyPass123", "expectedRole": "pharmacy",
+        })
+        approval_notifications = self.api(pharmacy_session, "/api/notifications")["notifications"]
+        approval_notice = next(item for item in approval_notifications if item["kind"] == "pharmacy_approved")
+        self.assertIn("تم اعتماد طلب تسجيل الصيدلية", approval_notice["message"])
+
+        with self.admin.open(self.base + "/data.js") as response:
+            self.assertIn(f'"accountId": "{pharmacy["id"]}"', response.read().decode("utf-8"))
+
+        self.api(self.patient, "/api/auth/login", "POST", {
+            "contact": "01056789012", "password": "PatientPass123", "expectedRole": "patient",
+        })
+        created = self.api(self.patient, "/api/orders", "POST", {
+            "medicineId": 1, "pharmacyId": pharmacy["id"], "quantity": 2,
+            "note": "يرجى تأكيد التوفر.",
+        }, expected=201)["order"]
+        self.assertEqual(created["status"], "pending")
+        self.assertEqual(created["pharmacyName"], "صيدلية الحجز")
+        self.assertNotIn("patientContact", created)
+        self.api(self.patient, "/api/orders", "POST", {
+            "medicineId": 1, "pharmacyId": "seed-pharmacy-not-linked", "quantity": 1,
+        }, expected=400)
+        admin_overview = self.api(self.admin, "/api/admin/overview")
+        self.assertEqual(admin_overview["orders"][0]["id"], created["id"])
+        self.assertIn("01030607046", admin_overview["adminWhatsApp"])
+        pharmacy_notice = next(
+            item for item in admin_overview["notifications"]
+            if item["relatedId"] == created["id"] and item["kind"] == "order_created"
+        )
+        self.assertTrue(any(
+            item["kind"] == "pharmacy_application"
+            and item["relatedId"] == pharmacy["id"]
+            for item in admin_overview["notifications"]
+        ))
+        self.api(self.admin, f"/api/admin/notifications/{pharmacy_notice['id']}", "PATCH", {"read": True})
+
+        incoming = self.api(pharmacy_session, "/api/orders")["orders"]
+        self.assertEqual(incoming[0]["id"], created["id"])
+        self.assertEqual(incoming[0]["patientContact"], "01056789012")
+        self.api(pharmacy_session, f"/api/orders/{created['id']}", "PATCH", {"status": "accepted"})
+        patient_orders = self.api(self.patient, "/api/orders")["orders"]
+        self.assertEqual(patient_orders[0]["status"], "accepted")
+        self.assertEqual(patient_orders[0]["pharmacyPhone"], "01056789013")
+        notifications = self.api(self.patient, "/api/notifications")["notifications"]
+        accepted_notice = next(item for item in notifications if item["kind"] == "order_accepted")
+        self.api(self.patient, f"/api/notifications/{accepted_notice['id']}", "PATCH", {"read": True})
+        self.api(self.patient, f"/api/orders/{created['id']}", "PATCH", {"status": "cancelled"})
+        self.api(pharmacy_session, f"/api/orders/{created['id']}", "PATCH", {"status": "fulfilled"}, expected=409)
+        self.assertEqual(self.api(self.patient, "/api/orders")["orders"][0]["status"], "cancelled")
 
     def test_login_attempts_are_rate_limited(self):
         for _ in range(5):

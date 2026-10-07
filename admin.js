@@ -10,7 +10,13 @@
     user_status_changed: "تغيير حالة مستخدم",
     medicine_updated: "تعديل بيانات دواء",
     shortage_report_added: "إضافة بلاغ نقص",
-    shortage_report_deleted: "حذف بلاغ نقص"
+    shortage_report_deleted: "حذف بلاغ نقص",
+    order_created: "طلب حجز جديد",
+    order_accepted: "قبول وحجز طلب",
+    order_rejected: "رفض طلب حجز",
+    order_fulfilled: "تأكيد استلام طلب",
+    order_cancelled: "إلغاء طلب حجز",
+    pharmacy_inventory_updated: "تحديث مخزون صيدلية"
   };
   const state = { overview: null, tab: "pharmacies", rejectingId: null };
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -44,23 +50,36 @@
   const loadOverview = async () => {
     const response = await request("/api/admin/overview");
     state.overview = response;
+    const unread = (response.notifications || []).filter((item) => !item.readAt).length;
+    const badge = $("#admin-notification-count");
+    badge.hidden = unread === 0;
+    badge.textContent = unread > 99 ? "99+" : String(unread);
+    $("#admin-notifications-open").setAttribute("aria-label", unread
+      ? `الإشعارات، ${unread} غير مقروء`
+      : "الإشعارات");
     renderTab();
   };
   const countStat = (number, label) => `<div class="admin-stat"><strong>${number.toLocaleString("ar-EG")}</strong><small>${escapeHtml(label)}</small></div>`;
   const statusBadge = (status) => `<span class="admin-badge ${escapeHtml(status)}">${({
     pending: "قيد المراجعة", approved: "مقبولة", rejected: "مرفوضة",
+    accepted: "محجوز", fulfilled: "تم الاستلام", cancelled: "ملغي",
     active: "نشط", suspended: "موقوف", unavailable: "غير متوفر", shortage: "نقص"
   })[status] || "متاح"}</span>`;
 
   const renderPharmacies = () => {
     const users = state.overview.users.filter((user) => user.role === "pharmacy");
     const pending = users.filter((user) => user.status === "pending");
+    const pharmacyDetails = (user) => `<div class="admin-meta">
+      <span>المحافظة: ${escapeHtml(user.governorate)}</span><span>المنطقة: ${escapeHtml(user.area)}</span>
+      <span>الترخيص: ${escapeHtml(user.license)}</span><span>الهاتف: ${escapeHtml(user.phone)}</span>
+      <span>واتساب: ${escapeHtml(user.whatsapp)}</span><span>الدوام: ${escapeHtml(user.openingTime)}–${escapeHtml(user.closingTime)}</span>
+    </div><p>${escapeHtml(user.address)}</p>${user.location
+      ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${user.location.lat},${user.location.lng}`)}" target="_blank" rel="noopener noreferrer">فتح موقع الصيدلية على الخريطة</a>`
+      : `<p>لم يتم تحديد الموقع على الخريطة.</p>`}`;
     return `${countStat(pending.length, "طلبات تنتظر القرار")}${pending.length ? `<div class="admin-list">${pending.map((user) => `<article class="admin-card">
-      <div>${statusBadge(user.status)}</div><h3>${escapeHtml(user.pharmacyName)}</h3>
-      <div class="admin-meta"><span>المحافظة: ${escapeHtml(user.governorate)}</span><span>المنطقة: ${escapeHtml(user.area)}</span><span>الترخيص: ${escapeHtml(user.license)}</span><span>الهاتف: ${escapeHtml(user.phone)}</span><span>واتساب: ${escapeHtml(user.whatsapp)}</span><span>الدوام: ${escapeHtml(user.openingTime)}–${escapeHtml(user.closingTime)}</span></div>
-      <p>${escapeHtml(user.address)}</p>${user.location ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${user.location.lat},${user.location.lng}`)}" target="_blank" rel="noopener noreferrer">فتح موقع الصيدلية على الخريطة</a>` : `<p>لم يتم تحديد الموقع على الخريطة.</p>`}
+      <div>${statusBadge(user.status)}</div><h3>${escapeHtml(user.pharmacyName)}</h3>${pharmacyDetails(user)}
       <div class="admin-actions"><button class="admin-approve" type="button" data-review="${escapeHtml(user.id)}" data-decision="approved">قبول الطلب</button><button class="admin-reject" type="button" data-start-reject="${escapeHtml(user.id)}">رفض مع ذكر السبب</button></div>${state.rejectingId === user.id ? `<form class="admin-form-box" data-reject-form="${escapeHtml(user.id)}"><div class="admin-field"><label for="rejection-reason">سبب الرفض الذي سيظهر للصيدلية</label><textarea id="rejection-reason" required maxlength="500"></textarea></div><div class="admin-actions"><button class="admin-reject" type="submit">تأكيد الرفض</button><button type="button" data-cancel-reject>إلغاء</button></div></form>` : ""}</article>`).join("")}</div>` : `<div class="admin-empty">لا توجد طلبات صيدليات قيد المراجعة.</div>`}
-      <h3>الطلبات التي تمت مراجعتها</h3><div class="admin-list">${users.filter((user) => user.status !== "pending").map((user) => `<article class="admin-card"><h3>${escapeHtml(user.pharmacyName)}</h3>${statusBadge(user.status)}<div class="admin-meta"><span>${escapeHtml(user.governorate)} · ${escapeHtml(user.area)}</span><span>${escapeHtml(user.phone)}</span></div>${user.rejectionReason ? `<p>سبب الرفض: ${escapeHtml(user.rejectionReason)}</p>` : ""}</article>`).join("") || `<div class="admin-empty">لا توجد طلبات سابقة.</div>`}</div>`;
+      <h3>الطلبات التي تمت مراجعتها</h3><div class="admin-list">${users.filter((user) => user.status !== "pending").map((user) => `<article class="admin-card"><h3>${escapeHtml(user.pharmacyName)}</h3>${statusBadge(user.status)}${pharmacyDetails(user)}<small>تاريخ التسجيل: ${dateText(user.createdAt)}</small>${user.rejectionReason ? `<p>سبب الرفض: ${escapeHtml(user.rejectionReason)}</p>` : ""}</article>`).join("") || `<div class="admin-empty">لا توجد طلبات سابقة.</div>`}</div>`;
   };
 
   const renderUsers = () => {
@@ -102,11 +121,42 @@
 
   const renderAudit = () => `<p>آخر ٢٠٠ عملية إدارية مسجلة. لا يمكن تعديل السجل من الواجهة.</p><div class="admin-audit">${state.overview.audit.map((item) => `<div class="audit-row"><strong>${escapeHtml(labels[item.action] || item.action)}</strong><small>${escapeHtml(item.actorContact)} · ${escapeHtml(item.targetType)} ${escapeHtml(item.targetId)} · ${dateText(item.createdAt)}</small><small>${escapeHtml(JSON.stringify(item.details))}</small></div>`).join("") || `<div class="admin-empty">لا توجد عمليات إدارية بعد.</div>`}</div>`;
 
+  const adminWhatsAppUrl = (message) => {
+    const phone = String(state.overview.adminWhatsApp || "").replace(/\D/g, "");
+    if (!/^01[0125]\d{8}$/.test(phone)) return "";
+    return `https://wa.me/20${phone.slice(1)}?text=${encodeURIComponent(message)}`;
+  };
+  const renderOrdersAndNotifications = () => {
+    const notifications = state.overview.notifications || [];
+    const unread = notifications.filter((item) => !item.readAt);
+    const orders = state.overview.orders || [];
+    const statusLabels = {
+      pending: "بانتظار رد الصيدلية", accepted: "محجوز", rejected: "مرفوض",
+      fulfilled: "تم الاستلام", cancelled: "ملغي"
+    };
+    const notificationCards = notifications.length ? notifications.map((item) => {
+      const whatsappUrl = adminWhatsAppUrl(`دوائي — ${item.title}\n${item.message}`);
+      return `<article class="admin-card ${item.readAt ? "" : "admin-notification-unread"}">
+        <div>${statusBadge(item.readAt ? "active" : "pending")}</div><h3>${escapeHtml(item.title)}</h3>
+        <p>${escapeHtml(item.message)}</p><small>${dateText(item.createdAt)}</small>
+        <div class="admin-actions">${whatsappUrl ? `<a class="admin-whatsapp" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener noreferrer">إرسال رسالة واتساب لرقم الإدارة</a>` : `<span>رقم واتساب الإدارة غير مضبوط.</span>`}
+        ${!item.readAt ? `<button type="button" data-read-notification="${escapeHtml(item.id)}">تحديد كمقروء</button>` : ""}</div>
+      </article>`;
+    }).join("") : `<div class="admin-empty">لا توجد إشعارات حتى الآن.</div>`;
+    const orderCards = orders.length ? orders.map((order) => `<article class="admin-card">
+      <div>${statusBadge(order.status)}</div><h3>${escapeHtml(order.medicineName)} · ${Number(order.quantity).toLocaleString("ar-EG")} ${escapeHtml(order.unit)}</h3>
+      <div class="admin-meta"><span>الصيدلية: ${escapeHtml(order.pharmacyName)}</span><span>المريض: ${escapeHtml(order.patientName || "—")}</span><span>تواصل المريض: ${escapeHtml(order.patientContact || order.patientPhone || "—")}</span><span>الصيدلية: ${escapeHtml(order.pharmacyAddress || "—")}</span><span>${dateText(order.createdAt)}</span></div>
+      ${order.note ? `<p>ملاحظة المريض: ${escapeHtml(order.note)}</p>` : ""}
+    </article>`).join("") : `<div class="admin-empty">لا توجد طلبات حجز بعد.</div>`;
+    return `${countStat(unread.length, "إشعارات غير مقروءة")}${countStat(orders.filter((order) => order.status === "pending").length, "طلبات تنتظر رد الصيدلية")}<h3>الإشعارات · ${notifications.length}</h3><p>تُحفظ طلبات الصيدليات والحجوزات هنا. زر واتساب يفتح رسالة جاهزة لرقم الإدارة ${escapeHtml(state.overview.adminWhatsApp)}؛ يلزم الضغط عليه لإرسالها.</p><div class="admin-list">${notificationCards}</div><h3>كل طلبات المرضى (${orders.length})</h3><div class="admin-list">${orderCards}</div>`;
+  };
+
   const renderTab = () => {
     if (!state.overview) return;
     $(".admin-tabs button.active")?.classList.remove("active");
     $(`[data-admin-tab="${state.tab}"]`)?.classList.add("active");
     if (state.tab === "pharmacies") content.innerHTML = renderPharmacies();
+    else if (state.tab === "orders") content.innerHTML = renderOrdersAndNotifications();
     else if (state.tab === "users") content.innerHTML = renderUsers();
     else if (state.tab === "medicines") content.innerHTML = renderMedicines();
     else if (state.tab === "shortages") content.innerHTML = renderHeatmap();
@@ -146,6 +196,11 @@
     }
   });
   $("#admin-refresh").addEventListener("click", () => refresh("تم تحديث بيانات الإدارة."));
+  $("#admin-notifications-open").addEventListener("click", () => {
+    state.tab = "orders";
+    renderTab();
+    $("#admin-content").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   $(".admin-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-tab]");
     if (!button) return;
@@ -158,8 +213,14 @@
     const userButton = event.target.closest("[data-user-status]");
     const medicineButton = event.target.closest("[data-save-medicine]");
     const reportButton = event.target.closest("[data-delete-report]");
+    const notificationButton = event.target.closest("[data-read-notification]");
     try {
-      if (startReject) {
+      if (notificationButton) {
+        await request(`/api/admin/notifications/${encodeURIComponent(notificationButton.dataset.readNotification)}`, {
+          method: "PATCH", body: JSON.stringify({ read: true })
+        });
+        await refresh("تم تحديد الإشعار كمقروء.");
+      } else if (startReject) {
         state.rejectingId = startReject.dataset.startReject;
         renderTab();
       } else if (event.target.closest("[data-cancel-reject]")) {
@@ -239,4 +300,12 @@
     if (!String(error.message).includes("سجّلي الدخول")) console.warn("تعذر استعادة جلسة الإدارة:", error);
     showLogin();
   });
+  window.setInterval(() => {
+    const dashboard = $("#admin-dashboard");
+    const editing = content.contains(document.activeElement)
+      && document.activeElement.matches("input,textarea,select");
+    if (!document.hidden && dashboard && !dashboard.hidden && !editing) {
+      refresh().catch((error) => console.error("تعذر تحديث إشعارات الإدارة تلقائيًا:", error));
+    }
+  }, 30000);
 })();

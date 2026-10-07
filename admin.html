@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f4faf9">
   <title>إدارة دوائي</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="admin.css?v=20261009">
-  <script src="admin.js?v=20261005-pharmacy-chat" defer></script>
+  <link rel="stylesheet" href="admin.css?v=20261006-pharmacy-stock-notifications">
+  <script src="admin.js?v=20261006-pharmacy-stock-notifications" defer></script>
 </head>
 <body class="admin-page">
   <header class="admin-header">
@@ -32,10 +32,11 @@
     <section id="admin-dashboard" hidden>
       <div class="admin-title-row">
         <div><span class="admin-eyebrow">لوحة متابعة مركزية</span><h1>إدارة دوائي</h1><p>مراجعة الطلبات، إدارة قاعدة الأدوية، وسجل النواقص والعمليات.</p></div>
-        <div class="admin-actions"><button class="button button-outline" id="admin-refresh" type="button">تحديث البيانات</button><button class="button button-outline" id="admin-logout" type="button">تسجيل الخروج</button></div>
+        <div class="admin-actions"><button class="button button-outline admin-notification-bell" id="admin-notifications-open" type="button" aria-label="الإشعارات">🔔 الإشعارات <span id="admin-notification-count" hidden>0</span></button><button class="button button-outline" id="admin-refresh" type="button">تحديث البيانات</button><button class="button button-outline" id="admin-logout" type="button">تسجيل الخروج</button></div>
       </div>
       <nav class="admin-tabs" aria-label="أقسام الإدارة">
         <button type="button" class="active" data-admin-tab="pharmacies">طلبات الصيدليات</button>
+        <button type="button" data-admin-tab="orders">الحجوزات والإشعارات</button>
         <button type="button" data-admin-tab="users">المستخدمون</button>
         <button type="button" data-admin-tab="medicines">قاعدة الأدوية</button>
         <button type="button" data-admin-tab="shortages">خريطة النواقص</button>

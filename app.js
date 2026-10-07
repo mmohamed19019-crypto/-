@@ -67,7 +67,7 @@
   };
   const whatsappHref = (value) => {
     const phone = normalizeContact(value);
-    return /^01[0125]\d{8}$/.test(phone) ? `https://wa.me/2${phone.slice(1)}` : "";
+    return /^01[0125]\d{8}$/.test(phone) ? `https://wa.me/20${phone.slice(1)}` : "";
   };
   const pharmacyRegion = (item) => {
     if (item.governorate) return item.governorate;
@@ -373,6 +373,15 @@
     authDialog.showModal();
     renderAuth();
   };
+  const openRoleAccount = (role) => {
+    if (currentUser?.role === role) {
+      authMode = "account";
+      authDialog.showModal();
+      renderAuth();
+      return;
+    }
+    showAuth(`${role}-login`);
+  };
   const renderAuth = () => {
     if (authMode === "choice") {
       authContent.innerHTML = authLayout("أهلاً بيك في دوائي", "نبدأ من هنا؟", "اختاري نوع الحساب المناسب؛ تقدري تعملي حسابًا للمريض وحسابًا مستقلًا للصيدلية حتى لو بنفس رقم الموبايل.", `${authHeader("حساب جديد أو مسجل", "اختاري نوع الحساب", "بيانات المريض وبيانات الصيدلية تُحفظ في ملفين منفصلين. اختاري نوع الحساب عند التسجيل أو الدخول.")}<div class="account-choice-grid"><button class="account-choice patient" type="button" data-auth-mode="patient-signup"><span class="account-choice-icon">♡</span><strong>تسجيل حساب مريض جديد</strong><small>ابحثي عن دوائك واحتفظي بقائمة أدويتك المطلوبة.</small></button><button class="account-choice pharmacy" type="button" data-auth-mode="pharmacy-signup"><span class="account-choice-icon">✚</span><strong>تسجيل صيدلية جديدة</strong><small>أنشئي حسابًا للصيدلية وقدّمي طلب الانضمام للمراجعة.</small></button></div><div class="account-login-grid"><button class="button button-outline" type="button" data-auth-mode="patient-login">عندي حساب مريض بالفعل — تسجيل الدخول</button><button class="button button-outline" type="button" data-auth-mode="pharmacy-login">عندي حساب صيدلية بالفعل — تسجيل الدخول</button></div>`);
@@ -437,22 +446,20 @@
       return false;
     }
   };
-  const saveCurrentUser = () => {
-    if (!currentUser) return false;
-    accounts = accounts.map((account) => account.id === currentUser.id ? currentUser : account);
-    const saved = persistAccounts();
-    if (saved) {
-      const profile = Object.fromEntries(["name", "governorate", "area", "onboardingComplete", "notificationPreference", "notificationPermission", "location", "requestedMedicineIds", "chronicMedicineIds"].filter((key) => key in currentUser).map((key) => [key, currentUser[key]]));
-      fetch("/api/profile", {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile })
-      }).then(async (response) => {
-        if (!response.ok) throw new Error((await response.json()).error || "تعذر مزامنة الملف الشخصي.");
-      }).catch((error) => console.warn("تعذرت مزامنة الملف الشخصي المركزي:", error));
-    }
-    return saved;
+  const saveCurrentUser = async (updates = {}) => {
+    if (!currentUser) throw new Error("سجّلي الدخول أولًا لحفظ بيانات الحساب.");
+    const accountId = currentUser.id;
+    const allowedFields = ["name", "governorate", "area", "onboardingComplete", "notificationPreference", "notificationPermission", "location", "requestedMedicineIds", "chronicMedicineIds"];
+    const profile = Object.fromEntries(allowedFields
+      .filter((key) => key in updates)
+      .map((key) => [key, updates[key]]));
+    const { user } = await apiRequest("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify({ profile })
+    });
+    if (currentUser?.id !== accountId) throw new Error("تغير الحساب قبل اكتمال الحفظ. سجّلي الدخول مجددًا للتحقق من بياناتك.");
+    setCurrentUser({ ...currentUser, ...user });
+    return true;
   };
   const apiRequest = async (path, options = {}) => {
     const response = await fetch(path, {
@@ -460,7 +467,15 @@
       ...options,
       headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers }
     });
-    const result = await response.json();
+    const responseText = await response.text();
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      throw new Error(response.ok
+        ? "استجابة الخادم غير صالحة. حدّثي الصفحة وحاولي مرة أخرى."
+        : `الخدمة المطلوبة غير متاحة على الخادم (HTTP ${response.status}).`);
+    }
     if (!response.ok) throw new Error(result.error || "تعذر الاتصال بالخادم.");
     return result;
   };
@@ -550,9 +565,21 @@
   const updateAuthButton = () => {
     const button = $("#auth-open");
     if (!button) return;
-    button.textContent = currentUser ? `حسابي · ${String(currentUser.name || currentUser.pharmacyName || "").split(" ")[0]}` : "دخول / حساب جديد";
+    const roleLabel = currentUser?.role === "pharmacy" ? "حساب صيدلية"
+      : currentUser?.role === "patient" ? "حساب مريض" : "";
+    button.textContent = currentUser
+      ? `${roleLabel} · ${String(currentUser.name || currentUser.pharmacyName || "").split(" ")[0]}`
+      : "دخول / حساب جديد";
     button.setAttribute("aria-label", currentUser ? "فتح حسابي" : "تسجيل الدخول أو إنشاء حساب");
-    authDialog.querySelector(".auth-close").hidden = !currentUser;
+    authDialog.querySelector(".auth-close").hidden = false;
+    $$("[data-account-role]").forEach((roleButton) => {
+      const role = roleButton.dataset.accountRole;
+      const active = currentUser?.role === role;
+      roleButton.classList.toggle("account-role-current", active);
+      roleButton.setAttribute("aria-label", active
+        ? `حساب ${role === "patient" ? "المريض" : "الصيدلية"} الحالي`
+        : `دخول أو إنشاء حساب ${role === "patient" ? "مريض" : "صيدلية"}`);
+    });
   };
   const setCurrentUser = (user) => {
     currentUser = user;
@@ -569,6 +596,7 @@
       console.warn("تعذر حفظ جلسة الحساب:", error);
     }
     updateAuthButton();
+    window.dispatchEvent(new CustomEvent("dawaey:account-changed", { detail: { user } }));
   };
   const finishLogin = (user) => {
     setCurrentUser(user);
@@ -591,11 +619,14 @@
       showToast("سجّلي دخولك كمريض عشان نحفظ الدواء في قائمتك.");
       return;
     }
-    currentUser.requestedMedicineIds = [...new Set([...(currentUser.requestedMedicineIds || []), medicineId])];
-    if (saveCurrentUser()) {
+    const requestedMedicineIds = [...new Set([...(currentUser.requestedMedicineIds || []), medicineId])];
+    saveCurrentUser({ requestedMedicineIds }).then(() => {
       renderAuth();
       showToast("اتحفظ الدواء في قائمة أدويتك المطلوبة.");
-    }
+    }).catch((error) => {
+      console.error("تعذر حفظ الدواء في ملف المريض:", error);
+      showToast(error.message || "تعذر حفظ الدواء على الخادم. حاولي مرة تانية.");
+    });
   };
 
   const renderOnboarding = () => {
@@ -621,6 +652,48 @@
     const medicineList = [...requested].map((id) => data.medicines.find((item) => item.id === id)).filter(Boolean);
     const chronicList = [...(currentUser.chronicMedicineIds || [])].map((id) => data.medicines.find((item) => item.id === id)).filter(Boolean);
     authContent.innerHTML = authLayout("ملفك الشخصي", `أهلاً ${currentUser.name.split(" ")[0]}`, "بيانات حسابك وقائمة أدويتك محفوظة في قاعدة الخادم المركزي.", `<div class="auth-kicker">حساب مريض</div><h1 class="auth-title" id="auth-title">${escapeHtml(currentUser.name)}</h1><p class="auth-description">${escapeHtml(currentUser.contact)} · ${escapeHtml(currentUser.governorate || "")}${currentUser.area ? ` · ${escapeHtml(currentUser.area)}` : ""}</p><h3 style="font-size:13px;margin:20px 0 7px">أدويتي المطلوبة <span class="results-count">(${medicineList.length})</span></h3>${medicineList.length ? `<div class="account-medicine-list">${medicineList.map((medicine) => `<div class="account-medicine-item"><span>✚ ${escapeHtml(medicine.name)}</span><button type="button" data-remove-medicine="${medicine.id}">إزالة</button></div>`).join("")}</div>` : `<div class="auth-notice">لسه مفيش أدوية في قائمتك. افتحي تفاصيل أي دواء واضغطي «أضف لقائمة أدويتي».</div>`}<h3 style="font-size:12px;margin:18px 0 7px">الأدوية المزمنة</h3><p class="auth-description">${chronicList.length ? chronicList.map((medicine) => escapeHtml(medicine.name)).join("، ") : "لم تختاري أدوية مزمنة في الإعداد."}</p><div class="auth-actions"><button class="button button-primary" type="button" data-account-search>ابحثي عن دواء</button><button class="button button-outline" type="button" data-signout>تسجيل الخروج</button></div><p class="auth-switch">بيانات الحساب تُحفظ في قاعدة بيانات الخادم المركزي.</p>`);
+  };
+  const refreshPharmacyOrders = async () => {
+    const target = $("#pharmacy-orders", authContent);
+    if (!target || currentUser?.role !== "pharmacy") return;
+    try {
+      const { user } = await apiRequest("/api/auth/session");
+      setCurrentUser({ ...currentUser, ...user });
+    } catch (error) {
+      console.error("تعذر تحديث حالة حساب الصيدلية:", error);
+      target.innerHTML = `<div class="auth-notice warning">${escapeHtml(error.message || "تعذر التحقق من حالة الصيدلية.")}</div>`;
+      return;
+    }
+    if (currentUser.status !== "approved") {
+      target.innerHTML = `<div class="auth-notice">تظهر طلبات المرضى بعد اعتماد الصيدلية.</div>`;
+      return;
+    }
+    target.textContent = "جارٍ تحميل الطلبات...";
+    try {
+      const { orders } = await apiRequest("/api/orders");
+      const statusLabels = {
+        pending: "بانتظار قرار الصيدلية",
+        accepted: "محجوز · بانتظار الاستلام",
+        rejected: "مرفوض",
+        fulfilled: "تم الاستلام",
+        cancelled: "ملغي"
+      };
+      target.innerHTML = orders.length ? orders.map((order) => {
+        const patientPhone = order.patientPhone || order.patientContact;
+        const contactLink = /^01[0125]\d{8}$/.test(normalizeContact(patientPhone))
+          ? `<a href="${escapeHtml(phoneHref(patientPhone))}">اتصال بالمريض · ${escapeHtml(patientPhone)}</a>`
+          : `<span>${escapeHtml(patientPhone || "لا يوجد رقم هاتف")}</span>`;
+        const controls = order.status === "pending"
+          ? `<button class="button button-primary" type="button" data-pharmacy-order="${escapeHtml(order.id)}" data-order-status="accepted">قبول وحجز</button><button class="button button-outline" type="button" data-pharmacy-order="${escapeHtml(order.id)}" data-order-status="rejected">رفض الطلب</button>`
+          : order.status === "accepted"
+            ? `<button class="button button-outline" type="button" data-pharmacy-order="${escapeHtml(order.id)}" data-order-status="fulfilled">تأكيد الاستلام</button>`
+            : "";
+        return `<article class="pharmacy-inventory-item"><span><strong>${escapeHtml(order.medicineName)} · ${Number(order.quantity).toLocaleString("ar-EG")} ${escapeHtml(order.unit)}</strong><small>${escapeHtml(statusLabels[order.status] || order.status)} · ${escapeHtml(order.patientName || "مريض")} · ${new Date(order.createdAt).toLocaleString("ar-EG")}</small>${order.note ? `<small>ملاحظة المريض: ${escapeHtml(order.note)}</small>` : ""}<small>${contactLink}</small></span><div class="auth-actions">${controls}</div></article>`;
+      }).join("") : `<div class="auth-notice">لا توجد طلبات حجز حتى الآن.</div>`;
+    } catch (error) {
+      console.error("تعذر تحميل طلبات المرضى للصيدلية:", error);
+      target.innerHTML = `<div class="auth-notice warning">${escapeHtml(error.message || "تعذر تحميل طلبات الحجز. حاولي تحديث الصفحة.")}</div>`;
+    }
   };
   const renderAuthForPharmacy = () => {
     if (!currentUser) return;
@@ -664,6 +737,9 @@
       <h3 class="feature-subheading">أدوية الصيدلية (${inventory.filter((item) => item.quantity > 0).length} متاحة)</h3>
       <p class="auth-description">حدّثي الكميات بنفسك. الأدوية التي كميتها صفر تظهر كغير متوفرة حسب آخر تحديث منك، وليست بيانًا عن السوق كله.</p>
       ${inventoryMarkup}
+      <h3 class="feature-subheading">طلبات حجز المرضى</h3>
+      <p class="auth-description">قبول الطلب يعني حجزه للصرف. راجعي الكمية الفعلية قبل القبول، واتصلي بالمريض عند الحاجة.</p>
+      <div class="pharmacy-inventory-list" id="pharmacy-orders"><div class="auth-notice">جارٍ تحميل الطلبات...</div></div>
       <form class="pharmacy-inventory-form" id="pharmacy-inventory-form">
         <label class="auth-field"><span class="auth-label">الدواء من دليل دوائي</span><select id="inventory-medicine" required><option value="">اختاري الدواء</option>${medicineOptions}</select></label>
         <label class="auth-field"><span class="auth-label">الكمية المتوفرة في صيدليتك</span><input id="inventory-quantity" type="number" min="0" max="1000000" step="1" value="1" required></label>
@@ -674,22 +750,31 @@
       ${nearbyMarkup}
       <div class="auth-actions"><button class="button button-primary" type="button" data-pharmacy-directory>عرض دليل صيدليات المحافظة</button><button class="button button-outline" type="button" data-signout>تسجيل الخروج</button></div>`;
     authContent.innerHTML = authLayout("ملف الصيدلية", "ملف حساب الصيدلية", "بيانات الحساب وحالة طلب الانضمام محفوظة في النظام المركزي.", content);
+    refreshPharmacyOrders();
   };
-  const completeOnboarding = (skip = false) => {
+  const completeOnboarding = async (skip = false) => {
     if (!currentUser) return;
-    currentUser.onboardingComplete = true;
+    const profile = { onboardingComplete: true };
     if (skip) {
-      currentUser.chronicMedicineIds = currentUser.chronicMedicineIds || [];
+      profile.chronicMedicineIds = currentUser.chronicMedicineIds || [];
     } else {
-      currentUser.notificationPreference = Boolean($("#onboarding-notifications")?.checked);
-      if (currentUser.notificationPreference && "Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission().then((permission) => {
-          currentUser.notificationPermission = permission;
-          saveCurrentUser();
-        }).catch((error) => console.warn("تعذر طلب إذن الإشعارات:", error));
+      profile.chronicMedicineIds = currentUser.chronicMedicineIds || [];
+      profile.notificationPreference = Boolean($("#onboarding-notifications")?.checked);
+      if (profile.notificationPreference && "Notification" in window && Notification.permission === "default") {
+        try {
+          profile.notificationPermission = await Notification.requestPermission();
+        } catch (error) {
+          console.warn("تعذر طلب إذن الإشعارات:", error);
+        }
       }
     }
-    saveCurrentUser();
+    try {
+      await saveCurrentUser(profile);
+    } catch (error) {
+      console.error("تعذر حفظ إعداد الحساب:", error);
+      showToast(error.message || "تعذر حفظ إعدادات الحساب. تحققي من الاتصال وحاولي مجددًا.");
+      return;
+    }
     authMode = "account";
     renderAuth();
     if (pendingMedicineId) {
@@ -899,6 +984,20 @@
   };
 
   authContent.addEventListener("click", async (event) => {
+    const pharmacyOrderButton = event.target.closest("[data-pharmacy-order]");
+    if (pharmacyOrderButton) {
+      try {
+        await apiRequest(`/api/orders/${encodeURIComponent(pharmacyOrderButton.dataset.pharmacyOrder)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: pharmacyOrderButton.dataset.orderStatus })
+        });
+        await refreshPharmacyOrders();
+        showToast(pharmacyOrderButton.dataset.orderStatus === "accepted" ? "تم قبول الطلب وحجزه." : "تم تحديث حالة طلب الحجز.");
+      } catch (error) {
+        showToast(error.message || "تعذر تحديث الطلب.");
+      }
+      return;
+    }
     const removeInventoryButton = event.target.closest("[data-remove-inventory]");
     if (removeInventoryButton) {
       try {
@@ -957,8 +1056,15 @@
     const removeButton = event.target.closest("[data-remove-medicine]");
     if (removeButton && currentUser) {
       const id = Number(removeButton.dataset.removeMedicine);
-      currentUser.requestedMedicineIds = currentUser.requestedMedicineIds.filter((medicineId) => medicineId !== id);
-      if (saveCurrentUser()) renderAuth();
+      const requestedMedicineIds = currentUser.requestedMedicineIds.filter((medicineId) => medicineId !== id);
+      try {
+        await saveCurrentUser({ requestedMedicineIds });
+        renderAuth();
+        showToast("تم تحديث قائمة أدويتك.");
+      } catch (error) {
+        console.error("تعذر تحديث قائمة أدوية المريض:", error);
+        showToast(error.message || "تعذر تحديث القائمة على الخادم. حاولي مرة تانية.");
+      }
       return;
     }
     const locationButton = event.target.closest("[data-onboarding-location]");
@@ -967,10 +1073,14 @@
         showToast("المتصفح لا يدعم تحديد الموقع؛ تقدري تكملي بدونه.");
         return;
       }
-      navigator.geolocation.getCurrentPosition((position) => {
-        currentUser.location = { lat: position.coords.latitude, lng: position.coords.longitude };
-        saveCurrentUser();
-        showToast("اتحفظ موقعك الدقيق في ملفك على الخادم المركزي.");
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        try {
+          await saveCurrentUser({ location: { lat: position.coords.latitude, lng: position.coords.longitude } });
+          showToast("اتحفظ موقعك الدقيق في ملفك على الخادم المركزي.");
+        } catch (error) {
+          console.error("تعذر حفظ موقع المستخدم:", error);
+          showToast(error.message || "تعذر حفظ موقعك على الخادم. حاولي مرة تانية.");
+        }
       }, (error) => {
         console.warn("تعذر تحديد موقع المستخدم:", error);
         showToast("لم نتمكن من تحديد الموقع. تقدري تكملي أو تتخطي الخطوة.");
@@ -1031,13 +1141,11 @@
     }
   });
   authDialog.addEventListener("click", (event) => {
-    if (event.target === authDialog && currentUser) authDialog.close();
+    if (event.target === authDialog) authDialog.close();
   });
-  authDialog.addEventListener("cancel", (event) => {
-    if (!currentUser) event.preventDefault();
-  });
+  authDialog.addEventListener("cancel", () => authDialog.close());
   authDialog.querySelector(".auth-close").addEventListener("click", () => {
-    if (currentUser) authDialog.close();
+    authDialog.close();
   });
   $("#auth-open").addEventListener("click", () => {
     if (currentUser) {
@@ -1046,21 +1154,36 @@
       renderAuth();
     } else showAuth("choice");
   });
+  $$("[data-account-role]").forEach((button) => {
+    button.addEventListener("click", () => openRoleAccount(button.dataset.accountRole));
+  });
 
   updateAuthButton();
   renderAuth();
-  authDialog.showModal();
   apiRequest("/api/auth/session").then(({ user }) => {
     const local = accounts.find((account) => account.id === user.id) || {};
     setCurrentUser({ ...local, ...user });
     authMode = user.role === "patient" && !user.onboardingComplete ? "onboarding" : "account";
-    authDialog.close();
+    if (authMode === "onboarding") {
+      authDialog.showModal();
+      renderAuth();
+    }
   }).catch((error) => {
     if (!error.message.includes("سجّلي الدخول")) console.warn("تعذر استعادة جلسة المستخدم:", error);
     setCurrentUser(null);
     authMode = "choice";
     renderAuth();
+    if (!error.message.includes("سجّلي الدخول")) {
+      const main = authContent.querySelector(".auth-main");
+      main?.insertAdjacentHTML("afterbegin", `<div class="auth-notice warning">تعذر الاتصال بخادم دوائي. يمكنكِ استعراض الموقع، لكن تسجيل الحساب وحفظ البيانات يحتاجان اتصال الخادم.</div>`);
+    }
+    authDialog.showModal();
   });
+  window.setInterval(() => {
+    if (document.visibilityState === "visible" && authDialog.open && currentUser?.role === "pharmacy") {
+      refreshPharmacyOrders();
+    }
+  }, 30000);
   $("#dialog-content").addEventListener("click", (event) => {
     const neededButton = event.target.closest("[data-add-needed]");
     if (neededButton) {

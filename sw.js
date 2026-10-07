@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "dawaey-shell-v19";
+const CACHE_NAME = "dawaey-shell-v26";
 const SHELL_FILES = [
   "./",
   "./index.html",
